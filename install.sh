@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# wallflow installer — deps, copy, launcher, then `wallflow setup` (detection + Hyprland wiring).
+#   ./install.sh [--yes] [--wallpaper-dir DIR] [--bind 'SUPER + W'] [--no-deps] [--no-hypr]
+set -euo pipefail
+
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/wallflow"
+BIN="$HOME/.local/bin"
+YES=0; NODEPS=0; SETUP_ARGS=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --yes|-y) YES=1; SETUP_ARGS+=(--yes) ;;
+        --no-deps) NODEPS=1 ;;
+        --no-hypr) SETUP_ARGS+=(--no-hypr) ;;
+        --wallpaper-dir=*|--bind=*) SETUP_ARGS+=("${arg%%=*}" "${arg#*=}") ;;
+        --wallpaper-dir|--bind) SETUP_ARGS+=("$arg") ;;
+        -h|--help) sed -n '2,3p' "$0"; exit 0 ;;
+        *) SETUP_ARGS+=("$arg") ;;
+    esac
+done
+
+say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m !!\033[0m %s\n' "$*"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------- deps
+install_deps() {
+    if have pacman; then
+        say "Arch: installing dependencies"
+        sudo pacman -S --needed --noconfirm python pyside6 qt6-declarative qt6-imageformats mpvpaper ffmpeg jq
+        if ! have wallust; then
+            local aur=""
+            for h in paru yay; do have "$h" && aur="$h" && break; done
+            if [ -n "$aur" ]; then
+                say "installing wallust from AUR via $aur"
+                "$aur" -S --needed --noconfirm wallust || warn "wallust install failed — theming will be off"
+            else
+                warn "no AUR helper (paru/yay) — install 'wallust' yourself for colour theming"
+            fi
+        fi
+    elif have apt-get; then
+        say "Debian/Ubuntu: installing what's packaged"
+        sudo apt-get install -y python3 python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtqml \
+            python3-pyside6.qtquick qml6-module-qtquick qml6-module-qtquick-window ffmpeg jq || \
+            warn "some packages failed — see README for manual steps"
+        have mpvpaper || warn "mpvpaper is not packaged here: build it from https://github.com/GhostNaN/mpvpaper"
+        have wallust  || warn "wallust missing: cargo install wallust  (or a release binary)"
+    elif have dnf; then
+        say "Fedora: installing what's packaged"
+        sudo dnf install -y python3 python3-pyside6 ffmpeg jq || warn "some packages failed"
+        have mpvpaper || warn "mpvpaper: try 'dnf install mpvpaper' or build from source"
+        have wallust  || warn "wallust missing: cargo install wallust"
+    else
+        warn "unknown distro — make sure python3, PySide6, mpvpaper, ffmpeg, wallust are installed"
+    fi
+}
+
+[ "$NODEPS" = 1 ] || install_deps
+
+# ---------------------------------------------------------------- copy
+say "installing to $DEST"
+mkdir -p "$DEST" "$BIN"
+if have rsync; then
+    rsync -a --delete --exclude .git --exclude __pycache__ "$SRC/" "$DEST/"
+else
+    rm -rf "$DEST"; mkdir -p "$DEST"; cp -r "$SRC"/. "$DEST"/; rm -rf "$DEST/.git"
+fi
+
+cat > "$BIN/wallflow" << LAUNCH
+#!/usr/bin/env bash
+exec python3 "$DEST/wallflow.py" "\$@"
+LAUNCH
+chmod +x "$BIN/wallflow"
+
+case ":$PATH:" in
+    *":$BIN:"*) ;;
+    *) warn "$BIN is not on your PATH — add it (fish: fish_add_path ~/.local/bin; bash/zsh: export PATH=\"\$HOME/.local/bin:\$PATH\")"
+       warn "the Hyprland bind/autostart use the absolute path, so they work regardless." ;;
+esac
+
+# ---------------------------------------------------------------- setup
+say "running setup"
+"$BIN/wallflow" setup "${SETUP_ARGS[@]}"
+
+echo
+say "done. Press your bind (default SUPER+W) or run 'wallflow'."
+echo "    wallflow addons list       # terminal colour addons (cava, kitty, foot, …)"
+echo "    wallflow transcode         # pre-transcode all video wallpapers now (optional)"
+echo "    wallflow config edit       # tweak anything"

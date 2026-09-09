@@ -1,0 +1,10 @@
+name = "foot"
+description = "foot config palette from the wallpaper (so terminal resets keep the colours)"
+requires = ["foot"]
+template = "wallflow-colors.ini"
+target = "~/.config/foot/wallflow-colors.ini"
+[include]
+file = "~/.config/foot/foot.ini"
+line = "include=~/.config/foot/wallflow-colors.ini"
+position = "top"
+note = "If foot.ini has its own [colors] section it overrides the include — delete/comment that section so the wallflow colours win."

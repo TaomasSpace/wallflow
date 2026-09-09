@@ -1,0 +1,7 @@
+name = "cava"
+description = "6-stop gradient bars from the wallpaper palette"
+requires = ["cava"]
+template = "config"
+target = "~/.config/cava/config"
+reload = "pkill -USR2 cava"
+note = "This replaces ~/.config/cava/config (your old one is kept as config.wallflow-bak). Edit the template in ~/.config/wallust/templates/wallflow-cava for bars/framerate settings."

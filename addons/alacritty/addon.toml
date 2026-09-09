@@ -1,0 +1,10 @@
+name = "alacritty"
+description = "alacritty colours (live_config_reload picks them up)"
+requires = ["alacritty"]
+template = "wallflow-colors.toml"
+target = "~/.config/alacritty/wallflow-colors.toml"
+[include]
+file = "~/.config/alacritty/alacritty.toml"
+line = "[general]\nimport = [\"~/.config/alacritty/wallflow-colors.toml\"]"
+position = "top"
+conflict = "^\\[general\\]|^import\\s*="

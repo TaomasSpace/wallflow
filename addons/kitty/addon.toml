@@ -1,0 +1,10 @@
+name = "kitty"
+description = "kitty terminal colours, live reload"
+requires = ["kitty"]
+template = "wallflow-colors.conf"
+target = "~/.config/kitty/wallflow-colors.conf"
+reload = "pkill -USR1 kitty"
+[include]
+file = "~/.config/kitty/kitty.conf"
+line = "include wallflow-colors.conf"
+position = "bottom"

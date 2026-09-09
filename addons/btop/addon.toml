@@ -1,0 +1,10 @@
+name = "btop"
+description = "btop theme from the palette (restart btop to see changes)"
+requires = ["btop"]
+template = "wallflow.theme"
+target = "~/.config/btop/themes/wallflow.theme"
+[include]
+file = "~/.config/btop/btop.conf"
+line = "color_theme = \"wallflow\""
+position = "bottom"
+replace = "^color_theme\\s*=.*$"
