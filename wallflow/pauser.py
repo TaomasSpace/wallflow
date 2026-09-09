@@ -1,4 +1,5 @@
 """Pause mpvpaper while a window is fullscreen (games, videos) — saves a decode loop.
+Also re-attaches mpvpaper when an output comes back (resume from sleep, hotplug).
 
 Listens on Hyprland's socket2 (a separate process, never a bind: shelling out
 from a bind blocks the compositor). Reconnects if Hyprland restarts.
@@ -9,6 +10,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from . import backend, paths
@@ -43,6 +45,19 @@ def _single_instance():
     return fh                            # keep the handle alive
 
 
+_reattach_timer = None
+
+
+def _schedule_reattach() -> None:
+    """Debounce: both outputs come back within a second of each other."""
+    global _reattach_timer
+    if _reattach_timer:
+        _reattach_timer.cancel()
+    _reattach_timer = threading.Timer(1.5, backend.reattach)
+    _reattach_timer.daemon = True
+    _reattach_timer.start()
+
+
 def main() -> None:
     _lock = _single_instance()
     path = _socket2_path()
@@ -64,6 +79,8 @@ def main() -> None:
                         state = line.split(">>", 1)[1].strip() == "1"
                         backend.mpv_command("set_property", "pause", state)
                         paused = state
+                    elif line.startswith("monitoradded"):     # monitoradded / monitoraddedv2
+                        _schedule_reattach()
         except OSError:
             pass
         time.sleep(2)                   # Hyprland gone / restarting — retry

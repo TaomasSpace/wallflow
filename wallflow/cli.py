@@ -48,6 +48,10 @@ def _cmd_restore(a, cfg):
     backend.restore(cfg)
 
 
+def _cmd_reattach(a, cfg):
+    backend.reattach(cfg)
+
+
 def _cmd_pauser(a, cfg):
     from . import pauser
     pauser.main()
@@ -125,7 +129,6 @@ def _cmd_doctor(a, cfg):
     s["current"] = backend.read_current() or "-"
     s["encoder"] = cfg["transcode"]["encoder"]
     s["addons_installed"] = sorted(addons.installed())
-    s["terminal_ptys"] = sorted(backend.terminal_ptys(cfg))
     print(json.dumps(s, indent=2))
 
 
@@ -141,6 +144,7 @@ def build_parser():
     sp.add_parser("prev").set_defaults(fn=_cmd_step(-1))
     sp.add_parser("random").set_defaults(fn=_cmd_random)
     sp.add_parser("restore").set_defaults(fn=_cmd_restore)
+    sp.add_parser("reattach", help="relaunch mpvpaper on all outputs (after resume)").set_defaults(fn=_cmd_reattach)
     sp.add_parser("pauser").set_defaults(fn=_cmd_pauser)
     sp.add_parser("theme").set_defaults(fn=_cmd_theme)
 
