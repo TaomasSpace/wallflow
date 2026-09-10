@@ -1,8 +1,10 @@
 name = "btop"
-description = "btop theme from the palette (restart btop to see changes)"
+description = "btop theme from the palette, hot-reloaded via SIGUSR2"
 requires = ["btop"]
 template = "wallflow.theme"
 target = "~/.config/btop/themes/wallflow.theme"
+reload = "pkill -USR2 -x btop"
+note = "Live reload uses btop's SIGUSR2 hot-reload (btop >= 1.3). btop 1.4.7 has a known crash on reload with the GPU box enabled — if btop dies on wallpaper change, restart it or set reload = \"\" in this addon."
 [include]
 file = "~/.config/btop/btop.conf"
 line = "color_theme = \"wallflow\""
