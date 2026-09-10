@@ -171,8 +171,11 @@ def theme(src: str, cfg: dict) -> int:
     _ensure_sequences_template()
     # -s: wallust must NOT broadcast — it hits every pty, including non-terminals
     # (Caelestia shell), which shows the raw escapes as a notification.
-    subprocess.run(["wallust", "run", "-s", *wallust_args(cfg), src],
-                   check=False, **_QUIET)
+    r = subprocess.run(["wallust", "run", "-s", *wallust_args(cfg), src],
+                       check=False, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"wallust failed ({r.returncode}): {r.stderr.strip() or r.stdout.strip()}", file=sys.stderr)
+        return 0
     n = broadcast(cfg)
     for cmd in addons.reload_commands():
         subprocess.run(cmd, shell=True, check=False, **_QUIET)
