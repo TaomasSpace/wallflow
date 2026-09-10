@@ -28,17 +28,18 @@ have() { command -v "$1" >/dev/null 2>&1; }
 install_deps() {
     if have pacman; then
         say "Arch: installing dependencies"
-        sudo pacman -S --needed --noconfirm python pyside6 qt6-declarative qt6-imageformats mpvpaper ffmpeg jq
-        if ! have wallust; then
-            local aur=""
-            for h in paru yay; do have "$h" && aur="$h" && break; done
+        sudo pacman -S --needed --noconfirm python pyside6 qt6-declarative qt6-imageformats ffmpeg jq
+        local aur=""
+        for h in paru yay; do have "$h" && aur="$h" && break; done
+        for pkg in mpvpaper wallust; do            # both are AUR, not in the official repos
+            have "$pkg" && continue
             if [ -n "$aur" ]; then
-                say "installing wallust from AUR via $aur"
-                "$aur" -S --needed --noconfirm wallust || warn "wallust install failed — theming will be off"
+                say "installing $pkg from AUR via $aur"
+                "$aur" -S --needed --noconfirm "$pkg" || warn "$pkg install failed — install it manually"
             else
-                warn "no AUR helper (paru/yay) — install 'wallust' yourself for colour theming"
+                warn "no AUR helper (paru/yay) found — install '$pkg' from the AUR yourself"
             fi
-        fi
+        done
     elif have apt-get; then
         say "Debian/Ubuntu: installing what's packaged"
         sudo apt-get install -y python3 python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtqml \
