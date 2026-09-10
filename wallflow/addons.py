@@ -5,9 +5,10 @@ Each addon is a folder in addons/ with an addon.toml:
     name        = "kitty"
     description = "…"
     requires    = ["kitty"]                   # binaries that should exist (warn only)
-    template    = "wallflow-colors.conf"      # file in the addon folder
+    template    = "wallflow-colors.conf"      # file in the addon folder (optional if bin is set)
     target      = "~/.config/kitty/wallflow-colors.conf"   # where wallust renders it
     reload      = "pkill -USR1 kitty"         # run after every wallpaper change (optional)
+    bin         = "wallflow-pipes"            # script in the addon folder -> ~/.local/bin (optional)
     [include]                                 # hook the rendered file into the app's config
     file     = "~/.config/kitty/kitty.conf"
     line     = "include wallflow-colors.conf"
@@ -29,6 +30,7 @@ from pathlib import Path
 from . import paths
 
 PREFIX = "wallflow-"
+BIN_DIR = Path.home() / ".local" / "bin"
 
 
 def _expand(p: str) -> Path:
@@ -146,24 +148,36 @@ def install(name: str, log=print) -> bool:
     if missing:
         log(f"note: {', '.join(missing)} not found in PATH — installing anyway")
 
-    # 1. template -> ~/.config/wallust/templates/wallflow-<name>.<ext>
-    src = a["_dir"] / a["template"]
-    tname = f"{PREFIX}{name}{src.suffix}"
-    paths.WALLUST_TEMPLATES.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, paths.WALLUST_TEMPLATES / tname)
+    state = {"name": name, "reload": a.get("reload", "")}
 
-    # 2. back up a pre-existing target we're about to overwrite (only once)
-    target = _expand(a["target"])
-    state = {"name": name, "template": tname, "target": str(target), "reload": a.get("reload", "")}
-    if target.exists() and name not in installed():
-        bak = target.with_name(target.name + ".wallflow-bak")
-        shutil.copyfile(target, bak)
-        state["backup"] = str(bak)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # 0. helper script -> ~/.local/bin (optional)
+    if a.get("bin"):
+        BIN_DIR.mkdir(parents=True, exist_ok=True)
+        dst = BIN_DIR / a["bin"]
+        shutil.copyfile(a["_dir"] / a["bin"], dst)
+        dst.chmod(0o755)
+        state["bin"] = str(dst)
 
-    # 3. register + include
-    _register(name, tname, a["target"])
-    hint = _patch_include(a["include"], state) if "include" in a else None
+    hint = None
+    if a.get("template"):
+        # 1. template -> ~/.config/wallust/templates/wallflow-<name>.<ext>
+        src = a["_dir"] / a["template"]
+        tname = f"{PREFIX}{name}{src.suffix}"
+        paths.WALLUST_TEMPLATES.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, paths.WALLUST_TEMPLATES / tname)
+
+        # 2. back up a pre-existing target we're about to overwrite (only once)
+        target = _expand(a["target"])
+        state.update(template=tname, target=str(target))
+        if target.exists() and name not in installed():
+            bak = target.with_name(target.name + ".wallflow-bak")
+            shutil.copyfile(target, bak)
+            state["backup"] = str(bak)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # 3. register + include
+        _register(name, tname, a["target"])
+        hint = _patch_include(a["include"], state) if "include" in a else None
 
     paths.ADDON_STATE_DIR.mkdir(parents=True, exist_ok=True)
     (paths.ADDON_STATE_DIR / f"{name}.json").write_text(json.dumps(state, indent=2))
@@ -180,14 +194,17 @@ def remove(name: str, log=print) -> bool:
     if not state:
         log(f"addon {name!r} is not installed")
         return False
-    _unregister(name)
-    (paths.WALLUST_TEMPLATES / state["template"]).unlink(missing_ok=True)
-    _unpatch_include(state)
-    target = Path(state["target"])
-    if state.get("backup") and Path(state["backup"]).exists():
-        shutil.move(state["backup"], target)
-    elif target.exists() and not state.get("include_file") == str(target):
-        target.unlink()
+    if state.get("bin"):
+        Path(state["bin"]).unlink(missing_ok=True)
+    if state.get("template"):
+        _unregister(name)
+        (paths.WALLUST_TEMPLATES / state["template"]).unlink(missing_ok=True)
+        _unpatch_include(state)
+        target = Path(state["target"])
+        if state.get("backup") and Path(state["backup"]).exists():
+            shutil.move(state["backup"], target)
+        elif target.exists() and not state.get("include_file") == str(target):
+            target.unlink()
     (paths.ADDON_STATE_DIR / f"{name}.json").unlink(missing_ok=True)
     log(f"removed addon {name}")
     return True
@@ -214,8 +231,10 @@ def info_text(name: str) -> str:
         return f"unknown addon {name!r}"
     lines = [f"{a['name']} — {a.get('description', '')}",
              f"  requires : {', '.join(a.get('requires', [])) or '-'}",
-             f"  renders  : {a['target']}",
+             f"  renders  : {a.get('target') or '-'}",
              f"  reload   : {a.get('reload') or '-'}"]
+    if a.get("bin"):
+        lines.append(f"  bin      : ~/.local/bin/{a['bin']}")
     if "include" in a:
         lines.append(f"  include  : {a['include']['line']}  ->  {a['include']['file']}")
     if a.get("note"):

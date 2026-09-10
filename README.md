@@ -55,7 +55,7 @@ fullscreen (games, videos) and resumes it after. Disable with `video.pause_on_fu
 ### Theming and addons
 
 Every wallpaper change runs `wallust run <image>` (for videos: a still frame), which also broadcasts
-colour sequences to open terminals — so `pipes.sh`, `cmatrix`, `tty-clock` & co. recolour live
+colour sequences to open terminals — so `cmatrix`, `tty-clock` & co. recolour live
 without any addon.
 
 Apps that keep their own colour config get an **addon**: a wallust template plus a tiny hook into
@@ -63,10 +63,11 @@ the app's config. `wallflow addons list` shows what's available:
 
 ```
 alacritty  alacritty colours (live_config_reload picks them up)
-btop       btop theme from the palette (restart btop)
+btop       btop theme from the palette, hot-reloaded
 cava       6-stop gradient bars from the wallpaper palette
 foot       foot terminal colours
 kitty      kitty terminal colours, live reload
+pipes      pipes.sh wrapper that survives its screen reset (run `wallflow-pipes`)
 ```
 
 `wallflow addons install cava,kitty` installs, renders colours for the current wallpaper right
