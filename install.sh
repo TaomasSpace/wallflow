@@ -67,6 +67,12 @@ else
     rm -rf "$DEST"; mkdir -p "$DEST"; cp -r "$SRC"/. "$DEST"/; rm -rf "$DEST/.git"
 fi
 
+# remember the source checkout so `wallflow update` can pull + reinstall
+{
+    echo "path=$SRC"
+    echo "url=$(git -C "$SRC" remote get-url origin 2>/dev/null || echo https://github.com/TaomasSpace/wallflow)"
+} > "$DEST/.source"
+
 cat > "$BIN/wallflow" << LAUNCH
 #!/usr/bin/env bash
 exec python3 "$DEST/wallflow.py" "\$@"

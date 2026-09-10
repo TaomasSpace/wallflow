@@ -36,6 +36,13 @@ DEFAULTS: dict = {
         "outputs": "*",               # mpvpaper output(s): "*" = all, or e.g. "DP-1"
         "mpv_opts": "no-audio loop hwdec=auto",
         "pause_on_fullscreen": True,
+        # At login mpvpaper must be created AFTER the image backend's background
+        # layer, or it ends up underneath it (same layer level, later surface wins).
+        # restore waits for this layer namespace (from `hyprctl layers`); "" = don't
+        # wait, "auto" = pick by image.backend. restore_delay = extra seconds after that.
+        "wait_for_layer": "auto",
+        "restore_timeout": 20,
+        "restore_delay": 0.5,
     },
     "transcode": {
         "enabled": True,

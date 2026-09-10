@@ -11,6 +11,7 @@
   wallflow config …            show / get / set / edit / path
   wallflow setup               (re)detect + wire up Hyprland
   wallflow doctor              show what was detected
+  wallflow update [--check]    pull the latest version from git and reinstall
 """
 import argparse
 import json
@@ -120,6 +121,11 @@ def _cmd_setup(a, cfg):
     return setup.run(a)
 
 
+def _cmd_update(a, cfg):
+    from . import update
+    return update.run(check_only=a.check)
+
+
 def _cmd_doctor(a, cfg):
     from . import detect
     s = detect.summary()
@@ -176,6 +182,9 @@ def build_parser():
     x.set_defaults(fn=_cmd_setup)
 
     sp.add_parser("doctor").set_defaults(fn=_cmd_doctor)
+    x = sp.add_parser("update")
+    x.add_argument("--check", action="store_true", help="only report whether an update exists")
+    x.set_defaults(fn=_cmd_update)
     return p
 
 

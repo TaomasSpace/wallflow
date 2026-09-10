@@ -12,6 +12,7 @@ import random
 import socket
 import subprocess
 import sys
+import time
 
 from . import addons, config, paths, thumbs, transcode
 
@@ -150,6 +151,32 @@ def apply(path: str, cfg: dict | None = None, do_theme: bool = True) -> None:
     _save_state(path)
 
 
+_BACKEND_LAYERS = {"caelestia": "caelestia-background", "swww": "swww-daemon", "hyprpaper": "hyprpaper"}
+
+
+def _layer_present(namespace: str) -> bool:
+    r = subprocess.run(["hyprctl", "layers"], capture_output=True, text=True)
+    return r.returncode == 0 and f"namespace: {namespace}" in r.stdout
+
+
+def _wait_for_desktop(cfg: dict) -> None:
+    """Block until outputs exist and the image backend's background layer is up,
+    so mpvpaper's layer is created on top of it (login race)."""
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return
+    ns = cfg["video"]["wait_for_layer"]
+    if ns == "auto":
+        ns = _BACKEND_LAYERS.get(cfg["image"]["backend"], "")
+    deadline = time.monotonic() + float(cfg["video"]["restore_timeout"])
+    while time.monotonic() < deadline:
+        r = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True)
+        have_outputs = r.returncode == 0 and r.stdout.strip() not in ("", "[]")
+        if have_outputs and (not ns or _layer_present(ns)):
+            break
+        time.sleep(0.5)
+    time.sleep(float(cfg["video"]["restore_delay"]))
+
+
 def restore(cfg: dict | None = None) -> None:
     """Re-apply the last wallpaper. Runs at login, after every Hyprland reload
     (caelestia triggers one per image change) and after resume — so it must be
@@ -162,6 +189,7 @@ def restore(cfg: dict | None = None) -> None:
         src = transcode.existing(path, cfg) or path
         if mpvpaper_running() and mpv_command("loadfile", src):
             return                                   # already up — just make sure it's this file
+        _wait_for_desktop(cfg)                       # login: don't get buried under the bg layer
         launch_mpvpaper(src, cfg)
     else:
         kill_mpvpaper()                              # a video layer must never outlive an image

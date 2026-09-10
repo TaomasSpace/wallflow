@@ -33,6 +33,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
 | `wallflow setup --redetect` | re-run detection (new GPU, new monitor, switched backend) |
 | `wallflow doctor` | print everything that was detected |
+| `wallflow update` | pull the newest version from GitHub and reinstall (`--check` only looks) |
 
 ### Videos and GIFs
 
