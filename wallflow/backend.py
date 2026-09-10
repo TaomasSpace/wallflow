@@ -130,13 +130,48 @@ def broadcast(cfg: dict) -> int:
     return n
 
 
+PALETTES = {
+    # name: description — wallust's built-in palettes (`wallust run --help`)
+    "dark":            "dark bg, 8 colours from the image",
+    "dark16":          "dark bg, 16 colours (default)",
+    "darkcomp":        "dark bg, complementary accents",
+    "darkcomp16":      "dark bg, complementary accents, 16 colours",
+    "harddark":        "very dark bg, high contrast",
+    "harddark16":      "very dark bg, high contrast, 16 colours",
+    "harddarkcomp":    "very dark bg, complementary accents",
+    "harddarkcomp16":  "very dark bg, complementary accents, 16 colours",
+    "softdark":        "dark bg, muted colours",
+    "softdark16":      "dark bg, muted colours, 16 colours",
+    "softdarkcomp":    "dark bg, muted, complementary accents",
+    "softdarkcomp16":  "dark bg, muted, complementary accents, 16 colours",
+    "light":           "light bg, 8 colours",
+    "light16":         "light bg, 16 colours",
+    "lightcomp":       "light bg, complementary accents",
+    "lightcomp16":     "light bg, complementary accents, 16 colours",
+    "softlight":       "light bg, muted colours",
+    "softlight16":     "light bg, muted colours, 16 colours",
+    "softlightcomp":   "light bg, muted, complementary accents",
+    "softlightcomp16": "light bg, muted, complementary accents, 16 colours",
+    "ansidark":        "keep ANSI hues, tint from image",
+    "ansidark16":      "keep ANSI hues, tint from image, 16 colours",
+}
+
+
+def wallust_args(cfg: dict) -> list[str]:
+    t = cfg["theme"]
+    args = ["-p", t.get("palette") or "dark16"]
+    if t.get("contrast", True):
+        args.append("-k")
+    return args + list(t.get("wallust_args", []))
+
+
 def theme(src: str, cfg: dict) -> int:
     if not cfg["theme"]["enabled"] or not _has("wallust"):
         return 0
     _ensure_sequences_template()
     # -s: wallust must NOT broadcast — it hits every pty, including non-terminals
     # (Caelestia shell), which shows the raw escapes as a notification.
-    subprocess.run(["wallust", "run", "-s", *cfg["theme"]["wallust_args"], src],
+    subprocess.run(["wallust", "run", "-s", *wallust_args(cfg), src],
                    check=False, **_QUIET)
     n = broadcast(cfg)
     for cmd in addons.reload_commands():

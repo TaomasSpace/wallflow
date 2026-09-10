@@ -30,7 +30,9 @@ DEFAULTS: dict = {
         "broadcast": "terminals",
         "terminals": ["foot", "kitty", "alacritty", "wezterm-gui", "ghostty", "st", "urxvt",
                       "konsole", "gnome-terminal-server", "xfce4-terminal", "tilix"],
-        "wallust_args": [],           # extra args, e.g. ["-p", "dark16"]
+        "palette": "dark16",          # wallust palette — `wallflow theme list` / `wallflow theme set <name>`
+        "contrast": True,             # wallust -k: lift slots that would be unreadable on the background
+        "wallust_args": [],           # extra raw wallust args
     },
     "video": {
         "outputs": "*",               # mpvpaper output(s): "*" = all, or e.g. "DP-1"

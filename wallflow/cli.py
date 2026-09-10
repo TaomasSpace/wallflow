@@ -7,6 +7,8 @@
   wallflow pauser              fullscreen watcher (autostart)
   wallflow transcode           pre-transcode every video wallpaper
   wallflow theme               re-run wallust + addon reloads
+  wallflow theme list          show wallust palettes (current marked)
+  wallflow theme set <name>    switch palette, save + re-theme
   wallflow addons …            list / install / remove / info
   wallflow config …            show / get / set / edit / path
   wallflow setup               (re)detect + wire up Hyprland
@@ -59,6 +61,18 @@ def _cmd_pauser(a, cfg):
 
 
 def _cmd_theme(a, cfg):
+    action = getattr(a, "action", None)
+    if action == "list":
+        cur = cfg["theme"]["palette"]
+        for n, d in backend.PALETTES.items():
+            print(f"{'*' if n == cur else ' '} {n:16} {d}")
+        return
+    if action == "set":
+        if a.name not in backend.PALETTES:
+            sys.exit(f"unknown palette {a.name!r} — see `wallflow theme list`")
+        cfg["theme"]["palette"] = a.name
+        config.save(cfg)
+        print(f"palette = {a.name}")
     cur = backend.read_current()
     if not cur:
         sys.exit("no wallpaper set yet")
@@ -154,7 +168,10 @@ def build_parser():
     sp.add_parser("restore").set_defaults(fn=_cmd_restore)
     sp.add_parser("reattach", help="relaunch mpvpaper on all outputs (after resume)").set_defaults(fn=_cmd_reattach)
     sp.add_parser("pauser").set_defaults(fn=_cmd_pauser)
-    sp.add_parser("theme").set_defaults(fn=_cmd_theme)
+    x = sp.add_parser("theme")
+    x.add_argument("action", nargs="?", choices=["list", "set"])
+    x.add_argument("name", nargs="?", help="palette name (for set)")
+    x.set_defaults(fn=_cmd_theme)
 
     x = sp.add_parser("transcode")
     x.add_argument("--file", help="one file instead of the whole folder")
@@ -196,6 +213,8 @@ def main(argv=None):
     cfg = config.load()
     if a.cmd is None:
         a.fn = _cmd_ui
+    if a.cmd == "theme" and a.action == "set" and not a.name:
+        p.error("palette name required — see `wallflow theme list`")
     if a.cmd == "addons" and a.action != "list" and not a.name:
         p.error("addon name required")
     if a.cmd == "config" and a.action in ("get", "set") and not a.key:

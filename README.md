@@ -28,6 +28,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `SUPER + W` / `wallflow` | open the picker — ←/→ or scroll, Enter apply, R random, Esc |
 | `wallflow next` / `prev` / `random` | cycle without the UI (bind these too if you like) |
 | `wallflow apply <file>` | set a wallpaper directly |
+| `wallflow theme list` | show wallust palettes; `set <name>` switches (saved + applied) |
 | `wallflow addons list` | show addons; `install <name>` / `remove <name>` / `info <name>` |
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
@@ -78,7 +79,7 @@ template — see `addons/README.md`.
 ```toml
 [general]  wallpaper_dir, recursive, image_exts, video_exts
 [image]    backend = "caelestia" | "swww" | "hyprpaper" | "none"
-[theme]    enabled, wallust_args = ["-p", "dark16"]
+[theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
 [ui]       thumb_width, backdrop
