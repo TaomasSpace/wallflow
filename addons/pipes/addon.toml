@@ -1,5 +1,5 @@
 name = "pipes"
-description = "pipes.sh that keeps the wallpaper palette after its screen reset (use `wallflow-pipes` instead of `pipes.sh`)"
+description = "pipes.sh keeps the wallpaper palette after its screen reset (drop-in, no config change)"
 requires = ["pipes.sh"]
-bin = "wallflow-pipes"
-note = "Run `wallflow-pipes [seconds] [pipes.sh args]` instead of `pipes.sh` (e.g. in your Hyprland autostart). pipes.sh's own reset does a terminal RIS, which drops foot back to its startup palette; the wrapper disables that and restarts pipes.sh every N seconds (default 300) with the current colours."
+bin = "pipes.sh"
+note = "Installs a wrapper as ~/.local/bin/pipes.sh that shadows the real one (make sure ~/.local/bin is first in PATH). It disables pipes.sh's own reset (RIS drops foot to its startup palette) and restarts it every $WALLFLOW_PIPES_INTERVAL seconds (default 300) with the current colours. Restart running pipes.sh windows once."

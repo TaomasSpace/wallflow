@@ -67,7 +67,7 @@ btop       btop theme from the palette, hot-reloaded
 cava       6-stop gradient bars from the wallpaper palette
 foot       foot terminal colours
 kitty      kitty terminal colours, live reload
-pipes      pipes.sh wrapper that survives its screen reset (run `wallflow-pipes`)
+pipes      pipes.sh keeps the palette after its screen reset (drop-in wrapper)
 ```
 
 `wallflow addons install cava,kitty` installs, renders colours for the current wallpaper right
