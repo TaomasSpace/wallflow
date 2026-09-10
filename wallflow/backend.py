@@ -259,8 +259,13 @@ def apply(path: str, cfg: dict | None = None, do_theme: bool = True) -> None:
     path = os.path.abspath(path)
     _save_state(path)   # FIRST: caelestia re-sources hyprland.lua -> `restore` runs mid-apply
     if config.is_video(cfg, path):
+        still = theme_source(path, cfg)
+        if cfg["image"]["backend"] == "caelestia":
+            # caelestia derives the shell scheme (bar, launcher, …) from *its*
+            # wallpaper — feed it the still frame so videos recolour the shell too.
+            set_image(still, cfg)
         if do_theme:
-            theme(theme_source(path, cfg), cfg)
+            theme(still, cfg)
         src = transcode.existing(path, cfg) or path
         play_video(src, cfg)
         if src == path and transcode.wanted(path, cfg):
