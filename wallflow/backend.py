@@ -159,10 +159,11 @@ PALETTES = {
 
 def wallust_args(cfg: dict) -> list[str]:
     t = cfg["theme"]
+    extra = list(t.get("wallust_args", []))
     args = ["-p", t.get("palette") or "dark16"]
-    if t.get("contrast", True):
+    if t.get("contrast", True) and not ({"-k", "--check-contrast"} & set(extra)):
         args.append("-k")
-    return args + list(t.get("wallust_args", []))
+    return args + extra
 
 
 def theme(src: str, cfg: dict) -> int:
