@@ -9,6 +9,7 @@ import QtQuick.Window
 
 Window {
     id: win
+    screen: Qt.application.screens[targetScreen]
     visibility: Window.FullScreen
     flags: Qt.FramelessWindowHint
     color: backdrop
@@ -163,6 +164,23 @@ Window {
 """
 
 
+def _focused_screen_index(app) -> int:
+    """Index into Qt.application.screens for the monitor Hyprland currently
+    focuses (on Wayland the client may pick the output for fullscreen, nothing else)."""
+    import json
+    import subprocess
+    try:
+        mons = json.loads(subprocess.run(["hyprctl", "monitors", "-j"],
+                                         capture_output=True, text=True, timeout=2).stdout)
+        name = next(m["name"] for m in mons if m.get("focused"))
+        for i, s in enumerate(app.screens()):
+            if s.name() == name:
+                return i
+    except Exception:
+        pass
+    return 0
+
+
 def run(cfg: dict) -> int:
     from PySide6.QtCore import QObject, Slot
     from PySide6.QtGui import QGuiApplication
@@ -192,6 +210,7 @@ def run(cfg: dict) -> int:
     ctx.setContextProperty("startIndex", start)
     ctx.setContextProperty("thumbWidth", int(cfg["ui"]["thumb_width"]))
     ctx.setContextProperty("backdrop", cfg["ui"]["backdrop"])
+    ctx.setContextProperty("targetScreen", _focused_screen_index(app))
     engine.loadData(QML.encode("utf-8"))
     if not engine.rootObjects():
         print("Failed to load QML.", file=sys.stderr)
