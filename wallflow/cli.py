@@ -62,7 +62,8 @@ def _cmd_theme(a, cfg):
     cur = backend.read_current()
     if not cur:
         sys.exit("no wallpaper set yet")
-    backend.theme(backend.theme_source(cur, cfg), cfg)
+    n = backend.theme(backend.theme_source(cur, cfg), cfg)
+    print(f"themed from {cur}; sequences pushed to {n} terminal pty(s)")
 
 
 def _cmd_transcode(a, cfg):
@@ -135,6 +136,7 @@ def _cmd_doctor(a, cfg):
     s["current"] = backend.read_current() or "-"
     s["encoder"] = cfg["transcode"]["encoder"]
     s["addons_installed"] = sorted(addons.installed())
+    s["terminal_ptys"] = sorted(backend.terminal_ptys(cfg))
     print(json.dumps(s, indent=2))
 
 

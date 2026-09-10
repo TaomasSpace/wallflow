@@ -51,14 +51,79 @@ def gather_wallpapers(cfg: dict) -> list[str]:
 
 # --- theming ---------------------------------------------------------------
 
-def theme(src: str, cfg: dict) -> None:
-    if not cfg["theme"]["enabled"] or not _has("wallust"):
+SEQ_FILE = paths.CACHE_DIR / "sequences"
+
+
+def _ensure_sequences_template() -> None:
+    """Register wallflow's OSC-sequence template with wallust (once / on change)."""
+    tpl = paths.WALLUST_TEMPLATES / "wallflow-sequences"
+    src = paths.PKG_DIR / "templates" / "sequences"
+    if tpl.exists() and tpl.read_bytes() == src.read_bytes() and paths.WALLUST_CONF.exists() \
+            and "wallflow-sequences =" in paths.WALLUST_CONF.read_text():
         return
-    # No -s: wallust must broadcast the colour sequences so open terminals recolour live.
-    # Only its stdout is discarded (it otherwise leaks as a notification).
-    subprocess.run(["wallust", "run", *cfg["theme"]["wallust_args"], src], check=False, **_QUIET)
+    paths.WALLUST_TEMPLATES.mkdir(parents=True, exist_ok=True)
+    tpl.write_bytes(src.read_bytes())
+    addons._register("sequences", "wallflow-sequences", "~/.cache/wallflow/sequences")
+
+
+def terminal_ptys(cfg: dict) -> set[str]:
+    """/dev/pts/* held open by known terminal emulators (theme.terminals)."""
+    names = set(cfg["theme"]["terminals"])
+    ptys = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                if f.read().strip() not in names:
+                    continue
+            for fd in os.listdir(f"/proc/{pid}/fd"):
+                try:
+                    t = os.readlink(f"/proc/{pid}/fd/{fd}")
+                except OSError:
+                    continue
+                if t.startswith("/dev/pts/"):
+                    ptys.add(t)
+        except OSError:
+            continue
+    return ptys
+
+
+def broadcast(cfg: dict) -> int:
+    """Push the rendered sequences into open terminals. Returns #ptys written."""
+    mode = cfg["theme"]["broadcast"]
+    if mode == "none" or not SEQ_FILE.exists():
+        return 0
+    data = SEQ_FILE.read_bytes()
+    if mode == "all":
+        import glob
+        targets = set(glob.glob("/dev/pts/[0-9]*"))
+    else:
+        targets = terminal_ptys(cfg)
+    n = 0
+    for t in targets:
+        try:
+            fd = os.open(t, os.O_WRONLY | os.O_NONBLOCK | os.O_NOCTTY)
+            os.write(fd, data)
+            os.close(fd)
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
+def theme(src: str, cfg: dict) -> int:
+    if not cfg["theme"]["enabled"] or not _has("wallust"):
+        return 0
+    _ensure_sequences_template()
+    # -s: wallust must NOT broadcast — it hits every pty, including non-terminals
+    # (Caelestia shell), which shows the raw escapes as a notification.
+    subprocess.run(["wallust", "run", "-s", *cfg["theme"]["wallust_args"], src],
+                   check=False, **_QUIET)
+    n = broadcast(cfg)
     for cmd in addons.reload_commands():
         subprocess.run(cmd, shell=True, check=False, **_QUIET)
+    return n
 
 
 def theme_source(path: str, cfg: dict) -> str:
