@@ -67,16 +67,34 @@ def _ensure_sequences_template() -> None:
 
 
 def terminal_ptys(cfg: dict) -> set[str]:
-    """/dev/pts/* held open by known terminal emulators (theme.terminals)."""
+    """/dev/pts/* slaves belonging to known terminal emulators (theme.terminals).
+
+    The emulator itself only holds the pty *master* (/dev/ptmx), so the slave
+    has to be picked up from its descendants (shell, tmux, cava, ...)."""
     names = set(cfg["theme"]["terminals"])
-    ptys = set()
+    comm, ppid = {}, {}
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
-            with open(f"/proc/{pid}/comm") as f:
-                if f.read().strip() not in names:
-                    continue
+            with open(f"/proc/{pid}/stat") as f:
+                st = f.read()
+            # comm may contain spaces/parens -> split around the last ')'
+            i = st.rindex(")")
+            comm[pid] = st[st.index("(") + 1:i]
+            ppid[pid] = st[i + 2:].split()[1]
+        except (OSError, ValueError):
+            continue
+    ptys = set()
+    for pid in comm:
+        p = ppid.get(pid)
+        while p in comm and p != "1":
+            if comm[p] in names:
+                break
+            p = ppid.get(p)
+        else:
+            continue
+        try:
             for fd in os.listdir(f"/proc/{pid}/fd"):
                 try:
                     t = os.readlink(f"/proc/{pid}/fd/{fd}")
