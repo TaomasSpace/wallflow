@@ -73,6 +73,8 @@ def run(check_only: bool = False) -> int:
     print("reinstalling …")
     r = subprocess.run(["bash", str(src / "install.sh"), "--no-deps", "--yes"])
     if r.returncode == 0:
+        # re-install addons whose files changed (runs the freshly installed code)
+        subprocess.run([str(paths.LAUNCHER), "addons", "refresh"], check=False)
         subprocess.run(["pkill", "-f", "wallflow.py pauser"], check=False)
         subprocess.Popen([str(paths.LAUNCHER), "pauser"], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

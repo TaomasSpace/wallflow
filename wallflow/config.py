@@ -54,6 +54,11 @@ DEFAULTS: dict = {
         "quality": 28,                # cq/crf/qp — lower = better/bigger
         "vaapi_device": "",           # auto-detected; e.g. /dev/dri/renderD128
     },
+    "addons": {
+        # pipes addon: pipes.sh is restarted every N seconds with the current palette
+        # (its own reset would drop the terminal back to the startup colours)
+        "pipes_interval": 60,
+    },
     "ui": {
         "thumb_width": 900,
         "backdrop": "#e6101216",

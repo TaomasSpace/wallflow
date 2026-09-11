@@ -3,4 +3,4 @@ description = "pipes.sh keeps the wallpaper palette after its screen reset (drop
 requires = ["pipes.sh"]
 bin = "pipes.sh"
 system_bin = true
-note = "Installs a wrapper as ~/.local/bin/pipes.sh and /usr/local/bin/pipes.sh (sudo) that shadows /usr/bin/pipes.sh for every process, including Hyprland exec hooks. It disables pipes.sh's own reset (RIS drops foot to its startup palette) and restarts it every $WALLFLOW_PIPES_INTERVAL seconds (default 300) with the current colours. Restart running pipes.sh windows once."
+note = "Installs a wrapper as ~/.local/bin/pipes.sh and /usr/local/bin/pipes.sh (sudo) that shadows /usr/bin/pipes.sh for every process, including Hyprland exec hooks. It disables pipes.sh's own reset (RIS drops foot to its startup palette) and restarts it every addons.pipes_interval seconds (config.toml, default 60; `wallflow config set addons.pipes_interval 120`) with the current colours. Restart running pipes.sh windows once."

@@ -107,6 +107,11 @@ def _cmd_addons(a, cfg):
     elif a.action == "remove":
         for n in a.name.split(","):
             addons.remove(n.strip())
+    elif a.action == "refresh":
+        if addons.refresh() and backend.read_current():
+            _cmd_theme(a, cfg)
+        else:
+            print("addons up to date")
 
 
 def _cmd_config(a, cfg):
@@ -182,7 +187,7 @@ def build_parser():
     x.set_defaults(fn=_cmd_transcode)
 
     x = sp.add_parser("addons")
-    x.add_argument("action", choices=["list", "install", "remove", "info"])
+    x.add_argument("action", choices=["list", "install", "remove", "info", "refresh"])
     x.add_argument("name", nargs="?", help="addon name (comma-separate for several)")
     x.set_defaults(fn=_cmd_addons)
 

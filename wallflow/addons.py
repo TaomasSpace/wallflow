@@ -23,6 +23,7 @@ Install = copy template into ~/.config/wallust/templates, register it in
 wallust.toml under [templates], patch the include, record what was done in
 ~/.config/wallflow/addons/<name>.json so `remove` can undo it precisely.
 """
+import hashlib
 import json
 import os
 import re
@@ -70,6 +71,14 @@ def reload_commands() -> list[str]:
 
 def _wallust_entry(name: str, template_name: str, target: str) -> str:
     return f'{PREFIX}{name} = {{ template = "{template_name}", target = "{target}" }}'
+
+
+def _digest(a: dict) -> str:
+    """Hash of the addon's source files — install() stores it, refresh() compares it."""
+    h = hashlib.sha256()
+    for f in sorted(p for p in a["_dir"].iterdir() if p.is_file()):
+        h.update(f.name.encode()); h.update(f.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def _register(name: str, template_name: str, target: str) -> None:
@@ -153,7 +162,12 @@ def install(name: str, log=print) -> bool:
     if missing:
         log(f"note: {', '.join(missing)} not found in PATH — installing anyway")
 
-    state = {"name": name, "reload": a.get("reload", "")}
+    prev = installed().get(name, {})
+    state = {"name": name, "reload": a.get("reload", ""), "digest": _digest(a)}
+    # re-installing on top: keep what `remove` needs to undo the first install
+    for k in ("backup", "include_file", "include_line", "replaced_line"):
+        if k in prev:
+            state[k] = prev[k]
 
     # 0. helper script -> ~/.local/bin (optional)
     if a.get("bin"):
@@ -201,6 +215,24 @@ def install(name: str, log=print) -> bool:
     if a.get("note"):
         log("  " + a["note"])
     return True
+
+
+def refresh(log=print) -> list[str]:
+    """Re-install every installed addon whose files changed since it was installed
+    (run by `wallflow update`). Returns the names that were refreshed."""
+    avail = available()
+    done = []
+    for name, state in installed().items():
+        a = avail.get(name)
+        if not a:
+            log(f"addon {name}: no longer shipped, leaving as is")
+            continue
+        if state.get("digest") == _digest(a):
+            continue
+        log(f"addon {name}: updated, re-installing")
+        if install(name, log):
+            done.append(name)
+    return done
 
 
 def remove(name: str, log=print) -> bool:
