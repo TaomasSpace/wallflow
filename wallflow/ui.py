@@ -218,10 +218,12 @@ def _relocate_when_mapped(app, mon: dict | None) -> None:
             if debug:
                 print(f"[wallflow] landed on monitor {win.get('monitor')}, moving to "
                       f"{mon['name']} (ws {target_ws})", file=sys.stderr)
-            subprocess.run(["hyprctl", "--batch",
-                            f"dispatch movetoworkspace {target_ws},class:^({APP_ID})$; "
-                            f"dispatch focuswindow class:^({APP_ID})$"],
-                           capture_output=True, timeout=2)
+            r = subprocess.run(["hyprctl", "--batch",
+                                f"dispatch movetoworkspace {target_ws},class:^({APP_ID})$; "
+                                f"dispatch focuswindow class:^({APP_ID})$"],
+                               capture_output=True, text=True, timeout=2)
+            if debug:
+                print(f"[wallflow] hyprctl: {(r.stdout + r.stderr).strip()}", file=sys.stderr)
         elif debug:
             print(f"[wallflow] mapped on {mon['name']} as requested", file=sys.stderr)
 
@@ -266,9 +268,35 @@ def run(cfg: dict) -> int:
     # Screen must be set on the QWindow *before* the first show: the Wayland
     # backend sends xdg_toplevel.set_fullscreen(output) at map time, and Hyprland
     # honours that output. Doing it via a QML binding raced with `visibility`.
+    from PySide6.QtCore import QTimer
     mon = _focused_monitor()
     win = engine.rootObjects()[0]
-    win.setScreen(_screen_for(app, mon))
-    win.showFullScreen()
-    _relocate_when_mapped(app, mon)
+    target = _screen_for(app, mon)
+    win.setScreen(target)
+
+    # Hyprland honours the output a client asks to go fullscreen on, but Qt only
+    # learns a window's real output (wl_surface.enter) after it is mapped — a
+    # fullscreen request before the first map carries a stale default output.
+    # So: map as a normal window (lands on the focused monitor), then go
+    # fullscreen once Qt reports the right screen.
+    done = [False]
+
+    def go_fullscreen():
+        if done[0]:
+            return
+        done[0] = True
+        if os.environ.get("WALLFLOW_DEBUG"):
+            print(f"[wallflow] fullscreen on {win.screen().name()}", file=sys.stderr)
+        win.showFullScreen()
+        _relocate_when_mapped(app, mon)
+
+    def on_screen(scr):
+        if scr is not None and scr.name() == target.name():
+            go_fullscreen()
+
+    win.screenChanged.connect(on_screen)
+    win.show()
+    if win.screen() is not None and win.screen().name() == target.name():
+        QTimer.singleShot(30, go_fullscreen)     # let the map + enter happen first
+    QTimer.singleShot(200, go_fullscreen)        # fallback, never stay windowed
     return app.exec()
