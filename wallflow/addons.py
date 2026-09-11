@@ -235,7 +235,9 @@ def refresh(log=print) -> list[str]:
     return done
 
 
-def remove(name: str, log=print) -> bool:
+def remove(name: str, log=print, purge: bool = False) -> bool:
+    """Undo an install. Default restores the app's config from the backup we took;
+    purge=True deletes the rendered file and the backup instead (clean slate)."""
     state = installed().get(name)
     if not state:
         log(f"addon {name!r} is not installed")
@@ -249,13 +251,23 @@ def remove(name: str, log=print) -> bool:
         (paths.WALLUST_TEMPLATES / state["template"]).unlink(missing_ok=True)
         _unpatch_include(state)
         target = Path(state["target"])
-        if state.get("backup") and Path(state["backup"]).exists():
+        if purge:
+            if state.get("backup"):
+                Path(state["backup"]).unlink(missing_ok=True)
+            if not state.get("include_file") == str(target):
+                target.unlink(missing_ok=True)
+        elif state.get("backup") and Path(state["backup"]).exists():
             shutil.move(state["backup"], target)
         elif target.exists() and not state.get("include_file") == str(target):
             target.unlink()
     (paths.ADDON_STATE_DIR / f"{name}.json").unlink(missing_ok=True)
-    log(f"removed addon {name}")
+    log(f"{'purged' if purge else 'removed'} addon {name}")
     return True
+
+
+def remove_all(log=print, purge: bool = False) -> None:
+    for name in list(installed()):
+        remove(name, log, purge)
 
 
 def list_text() -> str:

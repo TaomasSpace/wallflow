@@ -105,8 +105,11 @@ def _cmd_addons(a, cfg):
             if addons.install(n.strip()) and backend.read_current():
                 _cmd_theme(a, cfg)        # render colours right away
     elif a.action == "remove":
-        for n in a.name.split(","):
-            addons.remove(n.strip())
+        if a.name == "all":
+            addons.remove_all(purge=a.purge)
+        else:
+            for n in a.name.split(","):
+                addons.remove(n.strip(), purge=a.purge)
     elif a.action == "refresh":
         if addons.refresh() and backend.read_current():
             _cmd_theme(a, cfg)
@@ -144,6 +147,11 @@ def _cmd_setup(a, cfg):
 def _cmd_update(a, cfg):
     from . import update
     return update.run(check_only=a.check)
+
+
+def _cmd_uninstall(a, cfg):
+    from . import uninstall
+    return uninstall.run(purge=a.purge, yes=a.yes)
 
 
 def _cmd_doctor(a, cfg):
@@ -188,7 +196,9 @@ def build_parser():
 
     x = sp.add_parser("addons")
     x.add_argument("action", choices=["list", "install", "remove", "info", "refresh"])
-    x.add_argument("name", nargs="?", help="addon name (comma-separate for several)")
+    x.add_argument("name", nargs="?", help="addon name (comma-separate for several; 'all' for remove)")
+    x.add_argument("--purge", action="store_true",
+                   help="remove: delete the rendered file + backup instead of restoring the original")
     x.set_defaults(fn=_cmd_addons)
 
     x = sp.add_parser("config")
@@ -209,6 +219,10 @@ def build_parser():
     x = sp.add_parser("update")
     x.add_argument("--check", action="store_true", help="only report whether an update exists")
     x.set_defaults(fn=_cmd_update)
+    x = sp.add_parser("uninstall", help="remove wallflow (addons, Hyprland block, launcher, code)")
+    x.add_argument("--purge", action="store_true", help="also delete config, cache and addon backups")
+    x.add_argument("--yes", "-y", action="store_true", help="no confirmation prompt")
+    x.set_defaults(fn=_cmd_uninstall)
     return p
 
 
