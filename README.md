@@ -4,7 +4,7 @@ Coverflow wallpaper picker for **Hyprland**. Images, videos and GIFs, hardware-d
 wallpapers via `mpvpaper`, colour theming via `wallust`, addons that recolour your terminal apps.
 
 ```
-git clone https://github.com/TaomasSpace/wallflow && cd wallflow && ./install.sh
+   curl -fsSL https://raw.githubusercontent.com/TaomasSpace/wallflow/master/install.sh | bash
 ```
 
 That's it. The installer
