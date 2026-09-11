@@ -162,28 +162,71 @@ Window {
 """
 
 
-def _focused_screen(app):
-    """The QScreen for the monitor Hyprland currently focuses. On Wayland a client
-    can only choose the output it goes fullscreen on, so we pass exactly that."""
+APP_ID = "wallflow"
+
+
+def _hyprctl_json(*args):
     import json
+    import subprocess
+    out = subprocess.run(["hyprctl", *args, "-j"], capture_output=True, text=True, timeout=2).stdout
+    return json.loads(out)
+
+
+def _focused_monitor() -> dict | None:
+    try:
+        return next(m for m in _hyprctl_json("monitors") if m.get("focused"))
+    except Exception:
+        return None
+
+
+def _screen_for(app, mon: dict | None):
+    """QScreen matching the Hyprland monitor (Wayland output names match)."""
+    screens = app.screens()
+    if mon:
+        for s in screens:
+            if s.name() == mon["name"]:
+                return s
+    return app.primaryScreen()
+
+
+def _relocate_when_mapped(app, mon: dict | None) -> None:
+    """Hyprland ignores the output a client asks to go fullscreen on and puts the
+    window on whatever workspace it likes. Once our window shows up in
+    `hyprctl clients`, move it to the focused monitor's active workspace."""
     import os
     import subprocess
-    screens = app.screens()
+    from PySide6.QtCore import QTimer
+    if not mon:
+        return
     debug = os.environ.get("WALLFLOW_DEBUG")
-    try:
-        mons = json.loads(subprocess.run(["hyprctl", "monitors", "-j"],
-                                         capture_output=True, text=True, timeout=2).stdout)
-        name = next(m["name"] for m in mons if m.get("focused"))
-        if debug:
-            print(f"[wallflow] hyprland focused={name} qt screens={[s.name() for s in screens]}",
-                  file=sys.stderr)
-        for s in screens:
-            if s.name() == name:
-                return s
-    except Exception as e:
-        if debug:
-            print(f"[wallflow] focused-screen lookup failed: {e}", file=sys.stderr)
-    return app.primaryScreen()
+    target_ws = mon["activeWorkspace"]["id"]
+    tries = [0]
+    timer = QTimer(app)
+
+    def poll():
+        tries[0] += 1
+        try:
+            win = next(c for c in _hyprctl_json("clients") if c.get("class") == APP_ID)
+        except Exception:
+            win = None
+        if win is None:
+            if tries[0] >= 40:          # ~2 s, give up quietly
+                timer.stop()
+            return
+        timer.stop()
+        if win.get("monitor") != mon["id"]:
+            if debug:
+                print(f"[wallflow] landed on monitor {win.get('monitor')}, moving to "
+                      f"{mon['name']} (ws {target_ws})", file=sys.stderr)
+            subprocess.run(["hyprctl", "--batch",
+                            f"dispatch movetoworkspace {target_ws},class:^({APP_ID})$; "
+                            f"dispatch focuswindow class:^({APP_ID})$"],
+                           capture_output=True, timeout=2)
+        elif debug:
+            print(f"[wallflow] mapped on {mon['name']} as requested", file=sys.stderr)
+
+    timer.timeout.connect(poll)
+    timer.start(50)
 
 
 def run(cfg: dict) -> int:
@@ -198,6 +241,7 @@ def run(cfg: dict) -> int:
             backend.apply(path, cfg)
 
     app = QGuiApplication(sys.argv[:1])
+    app.setDesktopFileName(APP_ID)          # -> Wayland app_id / Hyprland class
     files = backend.gather_wallpapers(cfg)
     if not files:
         print(f"No wallpapers found in {config.wallpaper_dir(cfg)}", file=sys.stderr)
@@ -222,7 +266,9 @@ def run(cfg: dict) -> int:
     # Screen must be set on the QWindow *before* the first show: the Wayland
     # backend sends xdg_toplevel.set_fullscreen(output) at map time, and Hyprland
     # honours that output. Doing it via a QML binding raced with `visibility`.
+    mon = _focused_monitor()
     win = engine.rootObjects()[0]
-    win.setScreen(_focused_screen(app))
+    win.setScreen(_screen_for(app, mon))
     win.showFullScreen()
+    _relocate_when_mapped(app, mon)
     return app.exec()
