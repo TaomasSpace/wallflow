@@ -8,6 +8,8 @@ Each addon is a folder in addons/ with an addon.toml:
     template    = "wallflow-colors.conf"      # file in the addon folder (optional if bin is set)
     target      = "~/.config/kitty/wallflow-colors.conf"   # where wallust renders it
     reload      = "pkill -USR1 kitty"         # run after every wallpaper change (optional)
+    note        = "…"                         # printed after install (optional)
+    warning     = "…"                         # printed with a "!" after install and in `info` (optional)
     bin         = "wallflow-pipes"            # script in the addon folder -> ~/.local/bin (optional)
     system_bin  = true                        # also -> /usr/local/bin via sudo, so it shadows
                                               # /usr/bin for processes that don't have ~/.local/bin
@@ -214,6 +216,8 @@ def install(name: str, log=print) -> bool:
         log("  ! " + hint)
     if a.get("note"):
         log("  " + a["note"])
+    if a.get("warning"):
+        log("  ! " + a["warning"].replace("\n", "\n    "))
     return True
 
 
@@ -300,4 +304,6 @@ def info_text(name: str) -> str:
         lines.append(f"  include  : {a['include']['line']}  ->  {a['include']['file']}")
     if a.get("note"):
         lines.append(f"  note     : {a['note']}")
+    if a.get("warning"):
+        lines.append("  warning  : " + a["warning"].replace("\n", "\n             "))
     return "\n".join(lines)

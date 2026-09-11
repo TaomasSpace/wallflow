@@ -5,3 +5,7 @@ template = "config"
 target = "~/.config/cava/config"
 reload = "pkill -USR2 cava"
 note = "This replaces ~/.config/cava/config (your old one is kept as config.wallflow-bak). Edit the template in ~/.config/wallust/templates/wallflow-cava for bars/framerate settings."
+warning = """If you autostart cava (exec-once / hyprland.start), it may start while wallust is still
+writing ~/.config/cava/config at login and die with a parse error. Make it wait for the theme first:
+  exec-once = bash -c 'until [ ~/.cache/wallflow/sequences -nt /proc/1 ]; do sleep 0.2; done; sleep 0.5; exec foot cava'
+(same idea in a Lua config via hl.exec_cmd). Only cava needs this; other terminal apps are recoloured live."""
