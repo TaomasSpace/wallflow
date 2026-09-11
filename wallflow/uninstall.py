@@ -37,6 +37,11 @@ def run(purge: bool = False, yes: bool = False) -> int:
 
     paths.LAUNCHER.unlink(missing_ok=True)
     shutil.rmtree(paths.INSTALL_DIR, ignore_errors=True)
+    # the clone made by the curl one-liner / `wallflow update` is ours to delete;
+    # a checkout the user made themselves (anywhere else) is not
+    managed_src = paths.DATA_HOME / "wallflow-src"
+    if managed_src.is_dir():
+        shutil.rmtree(managed_src, ignore_errors=True)
     if purge:
         shutil.rmtree(paths.CONFIG_DIR, ignore_errors=True)
         shutil.rmtree(paths.CACHE_DIR, ignore_errors=True)

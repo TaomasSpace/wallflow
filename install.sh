@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # wallflow installer — deps, copy, launcher, then `wallflow setup` (detection + Hyprland wiring).
 #   ./install.sh [--yes] [--wallpaper-dir DIR] [--bind 'SUPER + W'] [--no-deps] [--no-hypr]
+#   one-liner: curl -fsSL https://raw.githubusercontent.com/TaomasSpace/wallflow/master/install.sh | bash
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/wallflow"
+MANAGED_SRC="${XDG_DATA_HOME:-$HOME/.local/share}/wallflow-src"
+REPO_URL="${WALLFLOW_REPO:-https://github.com/TaomasSpace/wallflow}"
+
+# Piped (`curl … | bash`) or run outside a checkout: clone into a managed
+# location that `wallflow update` pulls from and `wallflow uninstall` deletes.
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/wallflow.py" ]; then
+    SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    if [ -d "$MANAGED_SRC/.git" ]; then
+        git -C "$MANAGED_SRC" pull --ff-only --quiet || true
+    else
+        git clone --quiet "$REPO_URL" "$MANAGED_SRC"
+    fi
+    exec bash "$MANAGED_SRC/install.sh" "$@"
+fi
 BIN="$HOME/.local/bin"
 YES=0; NODEPS=0; SETUP_ARGS=()
 
