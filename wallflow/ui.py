@@ -9,8 +9,6 @@ import QtQuick.Window
 
 Window {
     id: win
-    screen: Qt.application.screens[targetScreen]
-    visibility: Window.FullScreen
     flags: Qt.FramelessWindowHint
     color: backdrop
 
@@ -164,21 +162,28 @@ Window {
 """
 
 
-def _focused_screen_index(app) -> int:
-    """Index into Qt.application.screens for the monitor Hyprland currently
-    focuses (on Wayland the client may pick the output for fullscreen, nothing else)."""
+def _focused_screen(app):
+    """The QScreen for the monitor Hyprland currently focuses. On Wayland a client
+    can only choose the output it goes fullscreen on, so we pass exactly that."""
     import json
+    import os
     import subprocess
+    screens = app.screens()
+    debug = os.environ.get("WALLFLOW_DEBUG")
     try:
         mons = json.loads(subprocess.run(["hyprctl", "monitors", "-j"],
                                          capture_output=True, text=True, timeout=2).stdout)
         name = next(m["name"] for m in mons if m.get("focused"))
-        for i, s in enumerate(app.screens()):
+        if debug:
+            print(f"[wallflow] hyprland focused={name} qt screens={[s.name() for s in screens]}",
+                  file=sys.stderr)
+        for s in screens:
             if s.name() == name:
-                return i
-    except Exception:
-        pass
-    return 0
+                return s
+    except Exception as e:
+        if debug:
+            print(f"[wallflow] focused-screen lookup failed: {e}", file=sys.stderr)
+    return app.primaryScreen()
 
 
 def run(cfg: dict) -> int:
@@ -210,9 +215,14 @@ def run(cfg: dict) -> int:
     ctx.setContextProperty("startIndex", start)
     ctx.setContextProperty("thumbWidth", int(cfg["ui"]["thumb_width"]))
     ctx.setContextProperty("backdrop", cfg["ui"]["backdrop"])
-    ctx.setContextProperty("targetScreen", _focused_screen_index(app))
     engine.loadData(QML.encode("utf-8"))
     if not engine.rootObjects():
         print("Failed to load QML.", file=sys.stderr)
         return 1
+    # Screen must be set on the QWindow *before* the first show: the Wayland
+    # backend sends xdg_toplevel.set_fullscreen(output) at map time, and Hyprland
+    # honours that output. Doing it via a QML binding raced with `visibility`.
+    win = engine.rootObjects()[0]
+    win.setScreen(_focused_screen(app))
+    win.showFullScreen()
     return app.exec()
