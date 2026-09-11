@@ -9,6 +9,9 @@ Each addon is a folder in addons/ with an addon.toml:
     target      = "~/.config/kitty/wallflow-colors.conf"   # where wallust renders it
     reload      = "pkill -USR1 kitty"         # run after every wallpaper change (optional)
     bin         = "wallflow-pipes"            # script in the addon folder -> ~/.local/bin (optional)
+    system_bin  = true                        # also -> /usr/local/bin via sudo, so it shadows
+                                              # /usr/bin for processes that don't have ~/.local/bin
+                                              # in PATH (Hyprland exec, autostart hooks) (optional)
     [include]                                 # hook the rendered file into the app's config
     file     = "~/.config/kitty/kitty.conf"
     line     = "include wallflow-colors.conf"
@@ -24,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -31,6 +35,7 @@ from . import paths
 
 PREFIX = "wallflow-"
 BIN_DIR = Path.home() / ".local" / "bin"
+SYSTEM_BIN_DIR = Path("/usr/local/bin")
 
 
 def _expand(p: str) -> Path:
@@ -157,6 +162,15 @@ def install(name: str, log=print) -> bool:
         shutil.copyfile(a["_dir"] / a["bin"], dst)
         dst.chmod(0o755)
         state["bin"] = str(dst)
+        if a.get("system_bin"):
+            sdst = SYSTEM_BIN_DIR / a["bin"]
+            log(f"installing {sdst} (sudo) so it is found without ~/.local/bin in PATH")
+            r = subprocess.run(["sudo", "install", "-Dm755", str(dst), str(sdst)])
+            if r.returncode == 0:
+                state["system_bin"] = str(sdst)
+            else:
+                log(f"note: could not install {sdst}; call ~/.local/bin/{a['bin']} by absolute "
+                    "path from Hyprland hooks instead")
 
     hint = None
     if a.get("template"):
@@ -196,6 +210,8 @@ def remove(name: str, log=print) -> bool:
         return False
     if state.get("bin"):
         Path(state["bin"]).unlink(missing_ok=True)
+    if state.get("system_bin") and Path(state["system_bin"]).exists():
+        subprocess.run(["sudo", "rm", "-f", state["system_bin"]])
     if state.get("template"):
         _unregister(name)
         (paths.WALLUST_TEMPLATES / state["template"]).unlink(missing_ok=True)
@@ -234,7 +250,8 @@ def info_text(name: str) -> str:
              f"  renders  : {a.get('target') or '-'}",
              f"  reload   : {a.get('reload') or '-'}"]
     if a.get("bin"):
-        lines.append(f"  bin      : ~/.local/bin/{a['bin']}")
+        lines.append(f"  bin      : ~/.local/bin/{a['bin']}"
+                     + (f", /usr/local/bin/{a['bin']} (sudo)" if a.get("system_bin") else ""))
     if "include" in a:
         lines.append(f"  include  : {a['include']['line']}  ->  {a['include']['file']}")
     if a.get("note"):
