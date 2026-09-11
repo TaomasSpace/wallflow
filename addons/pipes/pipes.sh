@@ -19,7 +19,7 @@ done
 [ -n "$real" ] || { echo "wallflow pipes: real pipes.sh not found in PATH" >&2; exit 127; }
 interval="${WALLFLOW_PIPES_INTERVAL:-300}"
 while :; do
-    timeout "$interval" "$real" "$@" -r 0
+    timeout --foreground "$interval" "$real" "$@" -r 0
     cat ~/.cache/wallflow/sequences 2>/dev/null
     printf '\e[H\e[2J'
 done
