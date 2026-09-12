@@ -33,6 +33,7 @@ def run(args) -> int:
             ans = input(f"Wallpaper folder [{default}]: ").strip()
             wdir = Path(ans).expanduser() if ans else default
     wdir.mkdir(parents=True, exist_ok=True)
+    (wdir / cfg["general"]["hidden_dir_name"]).mkdir(exist_ok=True)
     cfg["general"]["wallpaper_dir"] = str(wdir).replace(str(paths.HOME), "~", 1)
     _log(f"wallpapers   : {wdir}")
 

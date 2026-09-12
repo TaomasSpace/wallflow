@@ -36,16 +36,23 @@ def _save_state(path: str) -> None:
         pass
 
 
-def gather_wallpapers(cfg: dict) -> list[str]:
+def gather_wallpapers(cfg: dict, include_hidden: bool = False) -> list[str]:
     root = config.wallpaper_dir(cfg)
     exts = config.all_exts(cfg)
+    hidden_name = cfg["general"]["hidden_dir_name"]
     files = []
     if cfg["general"]["recursive"]:
         for d, dirs, fs in os.walk(root):
             dirs[:] = [x for x in dirs if not x.startswith(".")]
+            if not include_hidden and os.path.abspath(d) == os.path.abspath(root):
+                dirs[:] = [x for x in dirs if x != hidden_name]
             files += [os.path.join(d, f) for f in fs if f.lower().endswith(exts)]
     elif root.is_dir():
         files = [str(p) for p in root.iterdir() if p.is_file() and p.name.lower().endswith(exts)]
+        if include_hidden:
+            hdir = root / hidden_name
+            if hdir.is_dir():
+                files += [str(p) for p in hdir.iterdir() if p.is_file() and p.name.lower().endswith(exts)]
     return sorted(files, key=str.lower)
 
 

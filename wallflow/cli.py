@@ -1,6 +1,7 @@
 """wallflow command line.
 
   wallflow                     open the picker
+  wallflow ui --all            open the picker, including the hidden folder
   wallflow next|prev|random    cycle without the UI
   wallflow apply <file>        set a wallpaper directly
   wallflow restore             re-apply last wallpaper (autostart)
@@ -27,7 +28,7 @@ from . import __version__, addons, backend, config, paths, rename, transcode
 
 def _cmd_ui(a, cfg):
     from . import ui
-    return ui.run(cfg)
+    return ui.run(cfg, include_hidden=getattr(a, "all", False))
 
 
 def _cmd_apply(a, cfg):
@@ -192,7 +193,9 @@ def build_parser():
     p.add_argument("--version", action="version", version=f"wallflow {__version__}")
     sp = p.add_subparsers(dest="cmd")
 
-    sp.add_parser("ui").set_defaults(fn=_cmd_ui)
+    x = sp.add_parser("ui")
+    x.add_argument("--all", action="store_true", help="also show wallpapers in the hidden folder")
+    x.set_defaults(fn=_cmd_ui)
     x = sp.add_parser("apply"); x.add_argument("file"); x.set_defaults(fn=_cmd_apply)
     sp.add_parser("next").set_defaults(fn=_cmd_step(1))
     sp.add_parser("prev").set_defaults(fn=_cmd_step(-1))

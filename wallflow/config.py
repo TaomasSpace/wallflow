@@ -14,6 +14,9 @@ DEFAULTS: dict = {
         # extensions treated as image / video (GIF is a video: it plays in mpvpaper)
         "image_exts": [".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".tif", ".tiff", ".jxl"],
         "video_exts": [".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".gif"],
+        # subfolder (directly under wallpaper_dir) auto-created and excluded from the
+        # normal picker/cycling; only shown via the "show hidden" bind (default SUPER+SHIFT+W)
+        "hidden_dir_name": "hidden",
     },
     "image": {
         "backend": "caelestia",       # caelestia | swww | hyprpaper | none
@@ -70,6 +73,7 @@ DEFAULTS: dict = {
     },
     "hypr": {
         "bind": "SUPER + W",          # Lua form; .conf gets "SUPER, W"
+        "bind_all": "",                # "show hidden" bind; "" = bind's mods + SHIFT
         "config_file": "",            # auto: hyprland.lua > hyprland.conf
         "manage": True,               # write autostart/bind block into the config
     },

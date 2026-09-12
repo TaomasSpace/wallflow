@@ -231,7 +231,7 @@ def _relocate_when_mapped(app, mon: dict | None) -> None:
     timer.start(50)
 
 
-def run(cfg: dict) -> int:
+def run(cfg: dict, include_hidden: bool = False) -> int:
     from PySide6.QtCore import QObject, Slot
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlApplicationEngine
@@ -244,7 +244,7 @@ def run(cfg: dict) -> int:
 
     app = QGuiApplication(sys.argv[:1])
     app.setDesktopFileName(APP_ID)          # -> Wayland app_id / Hyprland class
-    files = backend.gather_wallpapers(cfg)
+    files = backend.gather_wallpapers(cfg, include_hidden=include_hidden)
     if not files:
         print(f"No wallpapers found in {config.wallpaper_dir(cfg)}", file=sys.stderr)
     items = [{"full": f, "thumb": thumbs.thumb_for(f, cfg),
