@@ -154,3 +154,35 @@ def close_special_workspaces() -> None:
             seen.add(name)
             subprocess.run(["hyprctl", "dispatch", "togglespecialworkspace", name], check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _clients() -> list:
+    try:
+        r = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=2)
+        return json.loads(r.stdout)
+    except Exception:
+        return []
+
+
+def unpin_pinned_windows() -> list[str]:
+    """A pinned window (Hyprland's `pin` dispatcher — how a lot of Discord/Spotify
+    quick-toggle setups show it) stays on top of every workspace regardless of focus,
+    so the picker opens underneath it. Unpin them and return their addresses so they
+    can be re-pinned with restore_pinned_windows() once the picker closes."""
+    if not detect.hyprland_running():
+        return []
+    addrs = [c["address"] for c in _clients() if c.get("pinned") and c.get("address")]
+    for addr in addrs:
+        subprocess.run(["hyprctl", "dispatch", "pin", f"address:{addr}"], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return addrs
+
+
+def restore_pinned_windows(addrs: list[str]) -> None:
+    if not addrs or not detect.hyprland_running():
+        return
+    still = {c["address"] for c in _clients()}
+    for addr in addrs:
+        if addr in still:
+            subprocess.run(["hyprctl", "dispatch", "pin", f"address:{addr}"], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

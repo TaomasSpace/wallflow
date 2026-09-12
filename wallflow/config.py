@@ -76,6 +76,9 @@ DEFAULTS: dict = {
         # close any active Discord/Spotify-style special workspace before the
         # picker opens, so it doesn't appear underneath it
         "close_special_workspaces": True,
+        # same idea for pinned windows (Hyprland's `pin` dispatcher) — unpinned
+        # while the picker is open, re-pinned the moment it closes
+        "hide_pinned_windows": True,
     },
     "hypr": {
         "bind": "SUPER + W",          # Lua form; .conf gets "SUPER, W"

@@ -27,11 +27,14 @@ from . import __version__, addons, backend, config, paths, rename, transcode
 
 
 def _cmd_ui(a, cfg):
-    from . import ui
+    from . import hypr, ui
     if cfg["ui"]["close_special_workspaces"]:
-        from . import hypr
         hypr.close_special_workspaces()
-    return ui.run(cfg, include_hidden=getattr(a, "all", False))
+    pinned = hypr.unpin_pinned_windows() if cfg["ui"]["hide_pinned_windows"] else []
+    try:
+        return ui.run(cfg, include_hidden=getattr(a, "all", False))
+    finally:
+        hypr.restore_pinned_windows(pinned)
 
 
 def _cmd_apply(a, cfg):
