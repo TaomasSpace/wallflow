@@ -28,6 +28,9 @@ from . import __version__, addons, backend, config, paths, rename, transcode
 
 def _cmd_ui(a, cfg):
     from . import ui
+    if cfg["ui"]["close_special_workspaces"]:
+        from . import hypr
+        hypr.close_special_workspaces()
     return ui.run(cfg, include_hidden=getattr(a, "all", False))
 
 

@@ -73,6 +73,9 @@ DEFAULTS: dict = {
     "ui": {
         "thumb_width": 900,
         "backdrop": "#e6101216",
+        # close any active Discord/Spotify-style special workspace before the
+        # picker opens, so it doesn't appear underneath it
+        "close_special_workspaces": True,
     },
     "hypr": {
         "bind": "SUPER + W",          # Lua form; .conf gets "SUPER, W"

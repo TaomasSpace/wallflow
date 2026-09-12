@@ -4,6 +4,7 @@ Supports the Lua config (hyprland.lua) and classic hyprlang (hyprland.conf).
 The block is delimited by markers so re-running setup replaces it in place and
 uninstall removes it cleanly; nothing else in the file is touched.
 """
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -132,3 +133,24 @@ def reload() -> None:
     if detect.hyprland_running():
         subprocess.run(["hyprctl", "reload"], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def close_special_workspaces() -> None:
+    """Discord/Spotify-style scratchpads (togglespecialworkspace) render above every
+    normal workspace, so the picker would open underneath them. Close whichever is
+    active on any monitor first, so the picker ends up on top like a normal window."""
+    if not detect.hyprland_running():
+        return
+    try:
+        r = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=2)
+        mons = json.loads(r.stdout)
+    except Exception:
+        return
+    seen = set()
+    for m in mons:
+        name = (m.get("specialWorkspace") or {}).get("name") or ""
+        name = name.removeprefix("special:")
+        if name and name not in seen:
+            seen.add(name)
+            subprocess.run(["hyprctl", "dispatch", "togglespecialworkspace", name], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
