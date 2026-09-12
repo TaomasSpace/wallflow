@@ -43,13 +43,16 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 Videos and GIFs play through `mpvpaper` (`hwdec=auto` → NVDEC/VA-API). Switching video→video is a
 live `loadfile` on the running instance, so there's no flash.
 
-**Transcoding** is automatic: the first time you pick a video that's bigger than your largest
-monitor, above `transcode.fps` (30), a GIF, or not H.264/HEVC, the original plays immediately and a
-background job re-encodes it to `~/.cache/wallflow/transcoded/`. When the job finishes it hot-swaps
-the lighter file in; every later pick uses it directly. Clips that are already within limits are
-played as-is. The encoder is probed at setup (`hevc_nvenc` → `hevc_vaapi` → `libx265` …) and can be
-overridden in the config. Changing `fps`, `max_width`, `quality` or `encoder` invalidates old
-transcodes; `wallflow transcode --prune` deletes the leftovers.
+**Transcoding**: for video that's already H.264/HEVC but bigger than your largest monitor or above
+`transcode.fps` (30), the original plays immediately and a background job re-encodes it to
+`~/.cache/wallflow/transcoded/`; when it finishes it hot-swaps the lighter file in, and every later
+pick uses it directly. For a GIF or a codec mpvpaper can't reliably loop (vp9/av1/…), playing the
+original raw would look static/broken rather than just heavier — so the first pick waits briefly
+for a real transcode (reusing one already in flight from `wallflow watch`'s prewarm, if there is
+one) instead of ever showing the raw file. Clips already within limits and the right codec are
+played as-is, no transcode. The encoder is probed at setup (`hevc_nvenc` → `hevc_vaapi` →
+`libx265` …) and can be overridden in the config. Changing `fps`, `max_width`, `quality` or
+`encoder` invalidates old transcodes; `wallflow transcode --prune` deletes the leftovers.
 
 **Fullscreen pause**: a tiny watcher on Hyprland's socket2 pauses mpvpaper while any window is
 fullscreen (games, videos) and resumes it after. Disable with `video.pause_on_fullscreen = false`.
@@ -96,6 +99,20 @@ wallpapers there you don't want in the regular rotation.
 there works normally. Configurable: `hypr.bind_all` (default: main bind + SHIFT),
 `general.hidden_dir_name` (default `"hidden"`).
 
+### Opening on top of Discord/Spotify-style overlays
+
+If your setup toggles apps via Hyprland special workspaces (`togglespecialworkspace`) or Hyprland's
+`pin` dispatcher, those render above every normal workspace — so the picker would otherwise open
+underneath them. Before showing the picker, wallflow:
+- closes whichever special workspace is active **on the currently focused monitor only** (one on a
+  different monitor is left alone — it won't overlap the picker, and touching it would just pull it
+  onto this monitor instead of hiding it); toggle syntax is auto-detected (classic
+  `hyprctl dispatch togglespecialworkspace <name>`, or the `hl.dsp.*` Lua-expression form some
+  Hyprland-Lua-config builds require — same detection as the `hyprland.lua`/`hyprland.conf` flavour);
+- unpins any pinned window, reopening the picker on top, then re-pins it the moment the picker closes.
+
+Both are on by default; disable with `ui.close_special_workspaces = false` / `ui.hide_pinned_windows = false`.
+
 ### Renaming wallpapers
 
 `wallflow rename` normalises filenames per directory, natural-sorted, collision-safe (renames go
@@ -117,10 +134,9 @@ are configurable, e.g. `wallflow config set rename.wallpaper_prefix wp`.
 
 When `rename.mode != 0`, two things happen automatically:
 - `wallflow setup` renames immediately (safe to run any time — a no-op if already renamed).
-- `wallflow watch` runs in the background (autostarted the same way as the fullscreen pauser)
-  and re-runs rename ~2s after any add/remove/move in the wallpaper folder. It's started/stopped
-  by `setup` based on the current mode, so flipping the mode and re-running `wallflow setup` is
-  all that's needed.
+- `wallflow watch` re-runs rename ~2s after any add/remove/move in the wallpaper folder (it also
+  handles prewarming — see above; both live in the same watcher process, started/stopped by
+  `setup` whenever `rename.mode != 0` **or** `auto_prewarm` is on).
 
 ### Config (`~/.config/wallflow/config.toml`)
 
@@ -131,7 +147,7 @@ When `rename.mode != 0`, two things happen automatically:
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
-[ui]       thumb_width, backdrop
+[ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
 [hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), config_file (auto), manage = true
 ```
 
