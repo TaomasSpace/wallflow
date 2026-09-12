@@ -6,6 +6,7 @@
   wallflow restore             re-apply last wallpaper (autostart)
   wallflow pauser              fullscreen watcher (autostart)
   wallflow transcode           pre-transcode every video wallpaper
+  wallflow rename [--dry-run]  rename wallpapers per [rename].mode
   wallflow theme               re-run wallust + addon reloads
   wallflow theme list          show wallust palettes (current marked)
   wallflow theme set <name>    switch palette, save + re-theme
@@ -21,7 +22,7 @@ import os
 import subprocess
 import sys
 
-from . import __version__, addons, backend, config, paths, transcode
+from . import __version__, addons, backend, config, paths, rename, transcode
 
 
 def _cmd_ui(a, cfg):
@@ -93,6 +94,19 @@ def _cmd_transcode(a, cfg):
         print(out or "not needed / failed")
         return
     transcode.run_all(cfg, force=a.force)
+
+
+def _cmd_rename(a, cfg):
+    ops = rename.plan(cfg)
+    if not ops:
+        print("mode 0 (off) or nothing to do")
+        return
+    if a.dry_run:
+        for old, new in ops:
+            print(f"{old} -> {new}")
+        return
+    rename.apply(ops)
+    print(f"renamed {len(ops)} file(s)")
 
 
 def _cmd_addons(a, cfg):
@@ -193,6 +207,10 @@ def build_parser():
     x.add_argument("--prune", action="store_true", help="delete stale transcodes")
     x.add_argument("-v", "--verbose", action="store_true")
     x.set_defaults(fn=_cmd_transcode)
+
+    x = sp.add_parser("rename", help="rename wallpapers per [rename].mode (0 off / 1 prefix / 2 full)")
+    x.add_argument("--dry-run", action="store_true", help="print planned renames without touching files")
+    x.set_defaults(fn=_cmd_rename)
 
     x = sp.add_parser("addons")
     x.add_argument("action", choices=["list", "install", "remove", "info", "refresh"])

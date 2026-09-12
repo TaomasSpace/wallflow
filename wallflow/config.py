@@ -54,6 +54,11 @@ DEFAULTS: dict = {
         "quality": 28,                # cq/crf/qp — lower = better/bigger
         "vaapi_device": "",           # auto-detected; e.g. /dev/dri/renderD128
     },
+    "rename": {
+        # 0 = off, 1 = prefix animated files with "animated_" (sort by type only),
+        # 2 = full rename to animated_wallpaper_N / wallpaper_N
+        "mode": 0,
+    },
     "addons": {
         # pipes addon: pipes.sh is restarted every N seconds with the current palette
         # (its own reset would drop the terminal back to the startup colours)
