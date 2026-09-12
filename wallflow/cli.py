@@ -252,7 +252,7 @@ def main(argv=None):
         a.fn = _cmd_ui
     if a.cmd == "theme" and a.action == "set" and not a.name:
         p.error("palette name required — see `wallflow theme list`")
-    if a.cmd == "addons" and a.action != "list" and not a.name:
+    if a.cmd == "addons" and a.action not in ("list", "refresh") and not a.name:
         p.error("addon name required")
     if a.cmd == "config" and a.action in ("get", "set") and not a.key:
         p.error("config key required (e.g. transcode.fps)")
