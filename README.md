@@ -26,6 +26,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | | |
 |---|---|
 | `SUPER + W` / `wallflow` | open the picker — ←/→ or scroll, Enter apply, R random, Esc |
+| `SUPER + SHIFT + W` / `wallflow ui --all` | open the picker including the `hidden` folder |
 | `wallflow next` / `prev` / `random` | cycle without the UI (bind these too if you like) |
 | `wallflow apply <file>` | set a wallpaper directly |
 | `wallflow theme list` | show wallust palettes; `set <name>` switches (saved + applied) |
@@ -76,31 +77,53 @@ away, and from then on re-renders (+ reloads the app where possible) on every ch
 `remove` undoes exactly what `install` did. Writing your own is a folder with an `addon.toml` and a
 template — see `addons/README.md`.
 
+### Hidden wallpapers
+
+A `hidden` subfolder is auto-created directly inside `wallpaper_dir` (`wallflow setup` creates it
+if missing). It's skipped by the normal picker, `next`/`prev`/`random`, and `rename` — put
+wallpapers there you don't want in the regular rotation.
+
+`SUPER + SHIFT + W` (`wallflow ui --all`) opens the picker including `hidden`; applying one from
+there works normally. Configurable: `hypr.bind_all` (default: main bind + SHIFT),
+`general.hidden_dir_name` (default `"hidden"`).
+
 ### Renaming wallpapers
 
 `wallflow rename` normalises filenames per directory, natural-sorted, collision-safe (renames go
-through temp names first). Mode is set in the config (`rename.mode`):
+through temp names first), and runs over the `hidden` folder too (each directory gets its own
+numbering, so hidden files never collide with the main folder's). Mode is set in the config
+(`rename.mode`):
 
 ```
 0   off (default) — nothing is touched
-1   prefix animated files with "animated_" — sorts by type, keeps the rest of the name
-2   full rename: animated_wallpaper_1, animated_wallpaper_2, wallpaper_1, wallpaper_2, …
+1   prefix animated files with rename.animated_prefix ("animated_") — sorts by type
+2   full rename: <rename.animated_wallpaper_prefix>_1, <rename.wallpaper_prefix>_1, …
 ```
+
+The prefixes (`rename.animated_prefix`, `rename.wallpaper_prefix`, `rename.animated_wallpaper_prefix`)
+are configurable, e.g. `wallflow config set rename.wallpaper_prefix wp`.
 
 `wallflow rename --dry-run` prints the planned renames without touching anything.
 `wallflow config set rename.mode 2` sets the mode.
 
+When `rename.mode != 0`, two things happen automatically:
+- `wallflow setup` renames immediately (safe to run any time — a no-op if already renamed).
+- `wallflow watch` runs in the background (autostarted the same way as the fullscreen pauser)
+  and re-runs rename ~2s after any add/remove/move in the wallpaper folder. It's started/stopped
+  by `setup` based on the current mode, so flipping the mode and re-running `wallflow setup` is
+  all that's needed.
+
 ### Config (`~/.config/wallflow/config.toml`)
 
 ```toml
-[general]  wallpaper_dir, recursive, image_exts, video_exts
+[general]  wallpaper_dir, recursive, image_exts, video_exts, hidden_dir_name
 [image]    backend = "caelestia" | "swww" | "hyprpaper" | "none"
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop
-[hypr]     bind = "SUPER + W", config_file (auto), manage = true
+[hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), config_file (auto), manage = true
 ```
 
 Everything the installer detected is just a default here — edit and rerun `wallflow setup` (it keeps
@@ -119,7 +142,7 @@ Hyprland config: the managed block is written in Lua for `hyprland.lua` and hypr
 
 ```
 wallflow.py        entry point
-wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · addons · ui · rename
+wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · watcher · addons · ui · rename
 addons/<name>/     addon.toml + wallust template
 install.sh · uninstall.sh
 ```

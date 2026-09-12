@@ -67,10 +67,15 @@ def _subdirs(root) -> list:
 
 
 def _watch_tree(fd: int, cfg: dict) -> dict:
-    """Add a watch on the wallpaper dir, and every subdir if recursive. wd -> path."""
+    """Add a watch on the wallpaper dir (+ subdirs if recursive), and always on
+    the hidden folder too — rename runs over it regardless of recursive."""
     root = config.wallpaper_dir(cfg)
     root.mkdir(parents=True, exist_ok=True)
     dirs = _subdirs(root) if cfg["general"]["recursive"] else [str(root)]
+    hidden = root / cfg["general"]["hidden_dir_name"]
+    hidden.mkdir(exist_ok=True)
+    if str(hidden) not in dirs:
+        dirs.append(str(hidden))
     wds = {}
     for d in dirs:
         try:

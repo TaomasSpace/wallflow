@@ -1,8 +1,11 @@
 """Wallpaper renaming — mode set in config [rename].mode.
 
   0  off (default) — nothing is touched
-  1  prefix animated files with "animated_" (sorts by type, keeps original names)
-  2  full rename: animated_wallpaper_<n> / wallpaper_<n>, per directory
+  1  prefix animated files with rename.animated_prefix (sorts by type, keeps original names)
+  2  full rename: <animated_wallpaper_prefix>_<n> / <wallpaper_prefix>_<n>, per directory
+
+Runs over the hidden folder too (each directory is renamed independently, so hidden
+files get their own numbering and never collide with the main folder's).
 """
 import os
 import re
@@ -25,11 +28,12 @@ def _by_dir(files: list[str]) -> dict:
 
 
 def _mode1_ops(files: list[str], cfg: dict) -> list[tuple[str, str]]:
+    prefix = cfg["rename"]["animated_prefix"]
     ops = []
     for f in files:
         d, name = os.path.split(f)
-        if config.is_video(cfg, f) and not name.startswith("animated_"):
-            ops.append((f, os.path.join(d, "animated_" + name)))
+        if config.is_video(cfg, f) and not name.startswith(prefix):
+            ops.append((f, os.path.join(d, prefix + name)))
     return ops
 
 
@@ -37,10 +41,11 @@ def _mode2_ops(files: list[str], cfg: dict) -> list[tuple[str, str]]:
     """Two-pass (via temp names) to avoid collisions, like the old shell script."""
     by_dir = _by_dir(files)
     ops: list[tuple[str, str]] = []
+    prefixes = (cfg["rename"]["animated_wallpaper_prefix"], cfg["rename"]["wallpaper_prefix"])
     for d, group in by_dir.items():
         animated = sorted((f for f in group if config.is_video(cfg, f)), key=_natural_key)
         stills = sorted((f for f in group if not config.is_video(cfg, f)), key=_natural_key)
-        for prefix, flist in (("animated_wallpaper", animated), ("wallpaper", stills)):
+        for prefix, flist in zip(prefixes, (animated, stills)):
             for i, f in enumerate(flist, start=1):
                 ext = os.path.splitext(f)[1]
                 target = os.path.join(d, f"{prefix}_{i}{ext}")
@@ -54,7 +59,7 @@ def plan(cfg: dict) -> list[tuple[str, str]]:
     mode = cfg["rename"]["mode"]
     if mode == 0:
         return []
-    files = backend.gather_wallpapers(cfg)
+    files = backend.gather_wallpapers(cfg, include_hidden=True)
     if mode == 1:
         return _mode1_ops(files, cfg)
     if mode == 2:

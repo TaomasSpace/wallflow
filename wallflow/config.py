@@ -58,9 +58,12 @@ DEFAULTS: dict = {
         "vaapi_device": "",           # auto-detected; e.g. /dev/dri/renderD128
     },
     "rename": {
-        # 0 = off, 1 = prefix animated files with "animated_" (sort by type only),
-        # 2 = full rename to animated_wallpaper_N / wallpaper_N
+        # 0 = off, 1 = prefix animated files with animated_prefix (sort by type only),
+        # 2 = full rename to <animated_wallpaper_prefix>_N / <wallpaper_prefix>_N
         "mode": 0,
+        "animated_prefix": "animated_",             # mode 1 prefix
+        "wallpaper_prefix": "wallpaper",             # mode 2 base name for stills
+        "animated_wallpaper_prefix": "animated_wallpaper",  # mode 2 base name for animated
     },
     "addons": {
         # pipes addon: pipes.sh is restarted every N seconds with the current palette
