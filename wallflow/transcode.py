@@ -5,6 +5,7 @@ source (path+mtime) and every setting that changes the output, so editing
 config.toml naturally invalidates old transcodes. Sources that are already
 within limits get a `.skip` marker and are played as-is.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -84,29 +85,49 @@ def _encoder_args(cfg: dict) -> tuple[list[str], list[str], str]:
 
 
 def run(src: str, cfg: dict, force: bool = False, quiet: bool = True) -> Path | None:
-    """Transcode one file. Returns the output path, or None if skipped/failed."""
+    """Transcode one file. Returns the output path, or None if skipped/failed.
+
+    `wallflow watch`'s prewarm and the on-demand background transcode spawned from
+    `apply()` can both target the exact same file within the same few seconds (e.g.
+    right after adding it). Without locking, both ffmpeg processes write to the same
+    .part.mp4 and the loser corrupts it. A per-target flock makes the second caller
+    back off instead of racing — stale .lock files are harmless and get swept up by
+    `prune()` like any other file that doesn't match a current target."""
     paths.TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
     dst = target(src, cfg)
     skip = dst.with_suffix(".skip")
     if dst.exists() and not force:
         return dst
-    info = _probe(src)
-    if not force and not _needs_transcode(src, cfg, info):
-        skip.touch()
+    lock_fh = open(dst.with_suffix(".lock"), "w")
+    try:
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return dst if dst.exists() else None      # another process already has this one
+        if dst.exists() and not force:                # finished while we waited to get here
+            return dst
+        info = _probe(src)
+        if not force and not _needs_transcode(src, cfg, info):
+            skip.touch()
+            return None
+        s = _settings(cfg)
+        pre, codec, vf_extra = _encoder_args(cfg)
+        vf = f"scale=w='min({s['w']},iw)':h=-2,fps={s['fps']}{vf_extra}"
+        tmp = dst.with_suffix(".part.mp4")
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "error", *pre, "-i", src,
+               "-vf", vf, *codec, "-an", "-movflags", "+faststart", str(tmp)]
+        out = subprocess.DEVNULL if quiet else None
+        r = subprocess.run(cmd, stdout=out, stderr=out)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            tmp.replace(dst)
+            return dst
+        tmp.unlink(missing_ok=True)
         return None
-    s = _settings(cfg)
-    pre, codec, vf_extra = _encoder_args(cfg)
-    vf = f"scale=w='min({s['w']},iw)':h=-2,fps={s['fps']}{vf_extra}"
-    tmp = dst.with_suffix(".part.mp4")
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "error", *pre, "-i", src,
-           "-vf", vf, *codec, "-an", "-movflags", "+faststart", str(tmp)]
-    out = subprocess.DEVNULL if quiet else None
-    r = subprocess.run(cmd, stdout=out, stderr=out)
-    if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
-        tmp.replace(dst)
-        return dst
-    tmp.unlink(missing_ok=True)
-    return None
+    finally:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
+        # not unlinked here — removing it while still open would race a process that
+        # opened the same path a moment earlier; prune() cleans it up later instead
 
 
 def run_all(cfg: dict, force: bool = False, log=print) -> None:
