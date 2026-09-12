@@ -135,10 +135,17 @@ def reload() -> None:
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def close_special_workspaces() -> None:
-    """Discord/Spotify-style scratchpads (togglespecialworkspace) render above every
-    normal workspace, so the picker would open underneath them. Close whichever is
-    active on any monitor first, so the picker ends up on top like a normal window."""
+def close_special_workspaces(cfg: dict | None = None) -> None:
+    """Close only the special workspace shown on the *currently focused* monitor.
+    One shown on a different monitor is left alone — it won't overlap the picker
+    (which opens on the focused monitor), and toggling it from here would just pull
+    it onto this monitor instead of hiding it. Works for any special workspace name
+    (communication, music, …) — read fresh from hyprctl each time, nothing hardcoded.
+
+    On a Hyprland build with Lua-config support, `hyprctl dispatch` expects a Lua
+    expression (hl.dsp.*) instead of classic `<dispatcher> <args>` syntax — detected
+    the same way as the config-file flavor (hyprland.lua vs hyprland.conf).
+    """
     if not detect.hyprland_running():
         return
     try:
@@ -146,14 +153,18 @@ def close_special_workspaces() -> None:
         mons = json.loads(r.stdout)
     except Exception:
         return
-    seen = set()
+    flavor = _target(cfg)[1] if cfg is not None else detect.hyprland_config()[1]
+    lua = flavor == "lua"
     for m in mons:
+        if not m.get("focused"):
+            continue
         name = (m.get("specialWorkspace") or {}).get("name") or ""
         name = name.removeprefix("special:")
-        if name and name not in seen:
-            seen.add(name)
-            subprocess.run(["hyprctl", "dispatch", "togglespecialworkspace", name], check=False,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not name:
+            continue
+        cmd = (["hyprctl", "dispatch", f'hl.dsp.workspace.toggle_special("{name}")'] if lua
+               else ["hyprctl", "dispatch", "togglespecialworkspace", name])
+        subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _clients() -> list:
