@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import config, detect, hypr, paths, transcode
+from . import config, detect, hypr, paths, rename as rename_mod, transcode
 
 
 def _log(msg: str) -> None:
@@ -76,9 +76,23 @@ def run(args) -> int:
     else:
         _log("hyprland     : not managed (hypr.manage = false)")
 
+    # --- rename ---------------------------------------------------------
+    mode = cfg["rename"]["mode"]
+    if mode != 0:
+        ops = rename_mod.plan(cfg)
+        rename_mod.apply(ops)
+        _log(f"rename       : mode {mode} — renamed {len(ops)} file(s)")
+
     # --- start the fullscreen pauser now (autostart covers next login) -----
     if cfg["video"]["pause_on_fullscreen"] and detect.hyprland_running():
         subprocess.Popen([paths.launcher_cmd(), "pauser"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # --- (re)start the folder watcher — restart always, to pick up wallpaper_dir
+    # / recursive changes; it exits immediately if mode is 0 -----------------
+    subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
+    if mode != 0:
+        subprocess.Popen([paths.launcher_cmd(), "watch"], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     missing = [t for t in ("mpvpaper", "ffmpeg") if not detect.which(t)]
@@ -94,3 +108,4 @@ def remove() -> None:
     if hypr.remove(cfg):
         print("  removed wallflow block from Hyprland config")
         hypr.reload()
+    subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)

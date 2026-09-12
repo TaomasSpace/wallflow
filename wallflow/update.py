@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import __version__, paths
+from . import __version__, config, paths
 
 SOURCE_FILE = paths.INSTALL_DIR / ".source"
 FALLBACK_SRC = paths.DATA_HOME / "wallflow-src"
@@ -78,4 +78,9 @@ def run(check_only: bool = False) -> int:
         subprocess.run(["pkill", "-f", "wallflow.py pauser"], check=False)
         subprocess.Popen([str(paths.LAUNCHER), "pauser"], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cfg = config.load()
+        subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
+        if cfg["rename"]["mode"] != 0:
+            subprocess.Popen([str(paths.LAUNCHER), "watch"], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return r.returncode

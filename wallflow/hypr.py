@@ -27,6 +27,7 @@ def render(flavor: str, cfg: dict) -> str:
     exe = paths.launcher_cmd()
     mods, key = _bind_parts(cfg["hypr"]["bind"])
     pauser = cfg["video"]["pause_on_fullscreen"]
+    watch = cfg["rename"]["mode"] != 0
     if flavor == "lua":
         lines = [
             f"-- {BEGIN}",
@@ -35,6 +36,8 @@ def render(flavor: str, cfg: dict) -> str:
         ]
         if pauser:
             lines.append(f'    hl.exec_cmd("{exe} pauser")')
+        if watch:
+            lines.append(f'    hl.exec_cmd("{exe} watch")')
         lines += [
             "end)",
             f'hl.bind("{mods.replace(" ", " + ")} + {key}", hl.dsp.exec_cmd("{exe}"))',
@@ -48,6 +51,8 @@ def render(flavor: str, cfg: dict) -> str:
         ]
         if pauser:
             lines.append(f"exec-once = {exe} pauser")
+        if watch:
+            lines.append(f"exec-once = {exe} watch")
         lines += [
             f"bind = {mods}, {key}, exec, {exe}",
             "layerrule = noanim, mpvpaper",

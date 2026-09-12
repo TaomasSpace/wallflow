@@ -96,6 +96,11 @@ def _cmd_transcode(a, cfg):
     transcode.run_all(cfg, force=a.force)
 
 
+def _cmd_watch(a, cfg):
+    from . import watcher
+    watcher.main()
+
+
 def _cmd_rename(a, cfg):
     ops = rename.plan(cfg)
     if not ops:
@@ -195,6 +200,7 @@ def build_parser():
     sp.add_parser("restore").set_defaults(fn=_cmd_restore)
     sp.add_parser("reattach", help="relaunch mpvpaper on all outputs (after resume)").set_defaults(fn=_cmd_reattach)
     sp.add_parser("pauser").set_defaults(fn=_cmd_pauser)
+    sp.add_parser("watch", help="watch the wallpaper folder and auto-rename on change (autostart)").set_defaults(fn=_cmd_watch)
     x = sp.add_parser("theme")
     x.add_argument("action", nargs="?", choices=["list", "set"])
     x.add_argument("name", nargs="?", help="palette name (for set)")

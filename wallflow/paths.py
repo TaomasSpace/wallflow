@@ -22,6 +22,7 @@ STATE_FILE = CACHE_DIR / "current"               # path of the last applied wall
 THUMB_DIR = CACHE_DIR / "thumbs"
 TRANSCODE_DIR = CACHE_DIR / "transcoded"
 PAUSER_LOCK = CACHE_DIR / "pauser.lock"
+WATCHER_LOCK = CACHE_DIR / "watcher.lock"
 
 MPV_SOCKET = RUNTIME_DIR / "wallflow-mpv.sock"   # mpv IPC (hot-swap / pause)
 

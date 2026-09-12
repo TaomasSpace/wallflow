@@ -33,6 +33,7 @@ def run(purge: bool = False, yes: bool = False) -> int:
         print(f"note: Hyprland block not removed ({e})", file=sys.stderr)
 
     subprocess.run(["pkill", "-f", "wallflow.py pauser"], check=False)
+    subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
     subprocess.run(["pkill", "-x", "mpvpaper"], check=False)
 
     paths.LAUNCHER.unlink(missing_ok=True)
