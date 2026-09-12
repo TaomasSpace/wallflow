@@ -69,6 +69,18 @@ def _needs_transcode(src: str, cfg: dict, info: dict) -> bool:
     return info["codec"] not in ("hevc", "h264")   # e.g. vp9/av1 with no hwdec
 
 
+def codec_compatible(src: str, cfg: dict) -> bool:
+    """True if mpvpaper can loop/animate the raw file correctly as-is — even if it's
+    still worth transcoding down for size/fps. False (a GIF, or a codec mpvpaper
+    can't reliably loop — vp9/av1/etc.) means playing it untranscoded doesn't just
+    look worse, it looks static/broken, so it must never be shown before the
+    one-off transcode finishes (see apply() in backend.py)."""
+    if src.lower().endswith(".gif"):
+        return False
+    info = _probe(src)
+    return bool(info) and info.get("codec") in ("hevc", "h264")
+
+
 def _encoder_args(cfg: dict) -> tuple[list[str], list[str], str]:
     """(global args before -i, codec args after filters, extra filter suffix)."""
     s = _settings(cfg)
@@ -84,15 +96,20 @@ def _encoder_args(cfg: dict) -> tuple[list[str], list[str], str]:
     return [], ["-pix_fmt", "yuv420p", "-c:v", enc, "-crf", str(q)] + preset, ""
 
 
-def run(src: str, cfg: dict, force: bool = False, quiet: bool = True) -> Path | None:
+def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool = False) -> Path | None:
     """Transcode one file. Returns the output path, or None if skipped/failed.
 
-    `wallflow watch`'s prewarm and the on-demand background transcode spawned from
-    `apply()` can both target the exact same file within the same few seconds (e.g.
-    right after adding it). Without locking, both ffmpeg processes write to the same
-    .part.mp4 and the loser corrupts it. A per-target flock makes the second caller
-    back off instead of racing — stale .lock files are harmless and get swept up by
-    `prune()` like any other file that doesn't match a current target."""
+    `wallflow watch`'s prewarm and the on-demand transcode from `apply()` can both
+    target the exact same file within seconds of each other (e.g. right after adding
+    it). A per-target flock serializes them so the second caller never races the
+    first one's .part.mp4 — stale .lock files are harmless and get swept up by
+    `prune()` like any other file that doesn't match a current target.
+
+    wait=True blocks for the lock (rather than backing off immediately) and, once
+    held, re-checks for a result before doing its own encode — for callers that
+    need a finished file, not just "started one" (see apply()'s codec_compatible
+    branch: playing the source before it's transcoded would look broken, not just
+    unoptimized, so it's worth waiting on someone else's in-flight encode)."""
     paths.TRANSCODE_DIR.mkdir(parents=True, exist_ok=True)
     dst = target(src, cfg)
     skip = dst.with_suffix(".skip")
@@ -100,12 +117,15 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True) -> Path | 
         return dst
     lock_fh = open(dst.with_suffix(".lock"), "w")
     try:
+        flags = fcntl.LOCK_EX if wait else (fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
-            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock_fh, flags)
         except OSError:
-            return dst if dst.exists() else None      # another process already has this one
-        if dst.exists() and not force:                # finished while we waited to get here
+            return dst if dst.exists() else None      # non-wait mode: another process has this one
+        if dst.exists() and not force:                # finished while we waited for the lock
             return dst
+        if skip.exists() and not force:                # decided (by whoever held the lock) not needed
+            return None
         info = _probe(src)
         if not force and not _needs_transcode(src, cfg, info):
             skip.touch()

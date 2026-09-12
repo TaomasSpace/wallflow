@@ -273,10 +273,18 @@ def apply(path: str, cfg: dict | None = None, do_theme: bool = True) -> None:
             set_image(still, cfg)
         if do_theme:
             theme(still, cfg)
-        src = transcode.existing(path, cfg) or path
+        src = transcode.existing(path, cfg)
+        if not src and transcode.wanted(path, cfg) and not transcode.codec_compatible(path, cfg):
+            # a GIF or a codec mpvpaper can't reliably loop (vp9/av1/…) — playing it
+            # raw wouldn't just be heavier, it'd look static/broken. Wait for the
+            # one-off transcode (or someone else's already in flight) instead.
+            out = transcode.run(path, cfg, wait=True)
+            src = str(out) if out else path
+        elif not src:
+            src = path
+            if transcode.wanted(path, cfg):
+                _spawn_background_transcode(path)
         play_video(src, cfg)
-        if src == path and transcode.wanted(path, cfg):
-            _spawn_background_transcode(path)
     else:
         kill_mpvpaper()
         set_image(path, cfg)
