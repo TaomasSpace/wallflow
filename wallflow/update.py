@@ -80,7 +80,7 @@ def run(check_only: bool = False) -> int:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cfg = config.load()
         subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
-        if cfg["rename"]["mode"] != 0:
+        if cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"]:
             subprocess.Popen([str(paths.LAUNCHER), "watch"], start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return r.returncode

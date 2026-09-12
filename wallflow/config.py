@@ -17,6 +17,9 @@ DEFAULTS: dict = {
         # subfolder (directly under wallpaper_dir) auto-created and excluded from the
         # normal picker/cycling; only shown via the "show hidden" bind (default SUPER+SHIFT+W)
         "hidden_dir_name": "hidden",
+        # build thumbnails + transcodes as soon as the watcher sees a change, instead of
+        # only lazily on first open/pick — shortens picker startup after adding wallpapers
+        "auto_prewarm": True,
     },
     "image": {
         "backend": "caelestia",       # caelestia | swww | hyprpaper | none

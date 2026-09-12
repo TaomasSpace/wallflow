@@ -54,6 +54,15 @@ transcodes; `wallflow transcode --prune` deletes the leftovers.
 **Fullscreen pause**: a tiny watcher on Hyprland's socket2 pauses mpvpaper while any window is
 fullscreen (games, videos) and resumes it after. Disable with `video.pause_on_fullscreen = false`.
 
+### Prewarming (thumbnails + transcodes ahead of time)
+
+By default (`general.auto_prewarm = true`) `wallflow watch` builds thumbnails and video
+transcodes as soon as it sees a change in the wallpaper folder, instead of waiting for the
+picker to need them. It also runs one pass immediately on start, so a fresh install/checkout
+or a folder full of new wallpapers gets cached before you ever open the picker — shortens the
+first `SUPER + W` after adding files. Set `auto_prewarm = false` to go back to the old lazy
+behaviour (build on first pick/open only).
+
 ### Theming and addons
 
 Every wallpaper change runs `wallust run <image>` (for videos: a still frame), which also broadcasts
@@ -116,7 +125,7 @@ When `rename.mode != 0`, two things happen automatically:
 ### Config (`~/.config/wallflow/config.toml`)
 
 ```toml
-[general]  wallpaper_dir, recursive, image_exts, video_exts, hidden_dir_name
+[general]  wallpaper_dir, recursive, image_exts, video_exts, hidden_dir_name, auto_prewarm
 [image]    backend = "caelestia" | "swww" | "hyprpaper" | "none"
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen

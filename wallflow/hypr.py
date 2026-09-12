@@ -41,7 +41,7 @@ def render(flavor: str, cfg: dict) -> str:
     mods, key = _bind_parts(cfg["hypr"]["bind"])
     mods_all, key_all = _all_bind_parts(cfg)
     pauser = cfg["video"]["pause_on_fullscreen"]
-    watch = cfg["rename"]["mode"] != 0
+    watch = cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"]
     if flavor == "lua":
         lines = [
             f"-- {BEGIN}",

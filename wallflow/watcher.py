@@ -1,9 +1,13 @@
-"""`wallflow watch` — watches the wallpaper folder and re-runs `rename` on changes.
+"""`wallflow watch` — watches the wallpaper folder and keeps it in sync automatically:
+renames (per [rename].mode) and pre-builds thumbnails + video transcodes so the picker
+doesn't have to do that lazily the next time it opens (general.auto_prewarm).
 
-Started by `wallflow setup` (if rename.mode != 0) and via Hyprland autostart, same
-pattern as pauser.py: single-instance lock, runs forever, re-reads the config on
-every debounced batch so a mode/dir change takes effect without a restart of its
-own (setup restarts it anyway to pick up wallpaper_dir / recursive changes).
+Started by `wallflow setup` (if rename.mode != 0 or auto_prewarm) and via Hyprland
+autostart, same pattern as pauser.py: single-instance lock, runs forever, re-reads
+the config on every debounced batch so a mode/dir change takes effect without a
+restart of its own (setup restarts it anyway to pick up wallpaper_dir / recursive
+changes). Also runs one pass immediately on start, to catch up on anything added
+while it wasn't running (e.g. a fresh install/checkout).
 
 Uses the raw inotify syscalls via ctypes — no extra dependency.
 """
@@ -16,7 +20,7 @@ import sys
 import threading
 import time
 
-from . import config, paths, rename
+from . import backend, config, paths, rename, thumbs, transcode
 
 _libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
 
@@ -68,7 +72,7 @@ def _subdirs(root) -> list:
 
 def _watch_tree(fd: int, cfg: dict) -> dict:
     """Add a watch on the wallpaper dir (+ subdirs if recursive), and always on
-    the hidden folder too — rename runs over it regardless of recursive."""
+    the hidden folder too — rename/prewarm run over it regardless of recursive."""
     root = config.wallpaper_dir(cfg)
     root.mkdir(parents=True, exist_ok=True)
     dirs = _subdirs(root) if cfg["general"]["recursive"] else [str(root)]
@@ -89,11 +93,29 @@ _debounce_timer = None
 _debounce_lock = threading.Lock()
 
 
+def _prewarm(cfg: dict) -> None:
+    """Build whatever's missing: thumbnails for everything, transcodes for videos
+    that need one. Same functions the picker would call lazily — just called ahead
+    of time so that call is a cache hit later."""
+    files = backend.gather_wallpapers(cfg, include_hidden=True)
+    for f in files:
+        try:
+            thumbs.thumb_for(f, cfg)
+        except Exception:
+            pass
+    for f in files:
+        if config.is_video(cfg, f) and transcode.wanted(f, cfg):
+            transcode.run(f, cfg)
+
+
 def _trigger() -> None:
     cfg = config.load()
-    ops = rename.plan(cfg)
-    if ops:
-        rename.apply(ops)
+    if cfg["rename"]["mode"] != 0:
+        ops = rename.plan(cfg)
+        if ops:
+            rename.apply(ops)
+    if cfg["general"]["auto_prewarm"]:
+        _prewarm(cfg)
 
 
 def _schedule() -> None:
@@ -113,10 +135,11 @@ def _is_relevant(name: str, cfg: dict) -> bool:
 def main() -> None:
     _lock = _single_instance()
     cfg = config.load()
-    if cfg["rename"]["mode"] == 0:
+    if cfg["rename"]["mode"] == 0 and not cfg["general"]["auto_prewarm"]:
         return
     fd = _inotify_init()
     wds = _watch_tree(fd, cfg)
+    _schedule()                           # catch up on anything added while we weren't running
     while True:
         data = os.read(fd, 64 * 1024)
         pos = 0
