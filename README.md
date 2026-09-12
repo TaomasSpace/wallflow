@@ -31,6 +31,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow theme list` | show wallust palettes; `set <name>` switches (saved + applied) |
 | `wallflow addons list` | show addons; `install <name>` / `remove <name>` / `info <name>` |
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
+| `wallflow rename [--dry-run]` | rename wallpapers per `rename.mode` (0 off / 1 prefix / 2 full) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
 | `wallflow setup --redetect` | re-run detection (new GPU, new monitor, switched backend) |
 | `wallflow doctor` | print everything that was detected |
@@ -75,6 +76,20 @@ away, and from then on re-renders (+ reloads the app where possible) on every ch
 `remove` undoes exactly what `install` did. Writing your own is a folder with an `addon.toml` and a
 template — see `addons/README.md`.
 
+### Renaming wallpapers
+
+`wallflow rename` normalises filenames per directory, natural-sorted, collision-safe (renames go
+through temp names first). Mode is set in the config (`rename.mode`):
+
+```
+0   off (default) — nothing is touched
+1   prefix animated files with "animated_" — sorts by type, keeps the rest of the name
+2   full rename: animated_wallpaper_1, animated_wallpaper_2, wallpaper_1, wallpaper_2, …
+```
+
+`wallflow rename --dry-run` prints the planned renames without touching anything.
+`wallflow config set rename.mode 2` sets the mode.
+
 ### Config (`~/.config/wallflow/config.toml`)
 
 ```toml
@@ -83,6 +98,7 @@ template — see `addons/README.md`.
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
+[rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop
 [hypr]     bind = "SUPER + W", config_file (auto), manage = true
 ```
@@ -103,8 +119,7 @@ Hyprland config: the managed block is written in Lua for `hyprland.lua` and hypr
 
 ```
 wallflow.py        entry point
-wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · addons · ui
+wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · addons · ui · rename
 addons/<name>/     addon.toml + wallust template
-tools/             rename-wallpapers.sh — sequential naming for a wallpaper folder
 install.sh · uninstall.sh
 ```
