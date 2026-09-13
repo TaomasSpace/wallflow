@@ -41,7 +41,7 @@ def render(flavor: str, cfg: dict) -> str:
     mods, key = _bind_parts(cfg["hypr"]["bind"])
     mods_all, key_all = _all_bind_parts(cfg)
     pauser = cfg["video"]["pause_on_fullscreen"]
-    watch = cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"]
+    watch = cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"] or cfg["depth"]["auto"]
     overlay = cfg["overlay"]["enabled"]
     edit = _bind_parts(cfg["hypr"]["bind_edit"]) if cfg["hypr"].get("bind_edit") else None
     if flavor == "lua":

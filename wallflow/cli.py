@@ -7,8 +7,10 @@
   wallflow restore             re-apply last wallpaper (autostart)
   wallflow pauser              fullscreen watcher (autostart)
   wallflow transcode           pre-transcode every video wallpaper
+  wallflow depth               3D-cutout status (setup, model, how many done/pending)
   wallflow depth setup [--gpu] install the segmentation venv (rembg) for subject cutouts
-  wallflow depth               pre-segment every image wallpaper
+  wallflow depth all [-y]      segment every image wallpaper now (slow — it warns and shows ETA)
+  wallflow depth on|off [file] switch the cutout on/off per image (default: current wallpaper)
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
@@ -113,15 +115,34 @@ def _cmd_depth(a, cfg):
     if a.prune:
         print(f"pruned {depth.prune(cfg)} stale file(s)")
         return
+    if a.action in ("on", "off"):
+        src = os.path.abspath(os.path.expanduser(a.name)) if a.name else backend.read_current()
+        if not src:
+            sys.exit("no wallpaper set and no file given")
+        depth.set_enabled(src, a.action == "on")
+        print(f"3D cutout {a.action} for {os.path.basename(src)}")
+        if a.action == "on" and depth.wanted(src, cfg) and src == backend.read_current():
+            backend._spawn_background_cutout(src)
+        overlay.ensure(cfg)                # hides / shows it live
+        return
     if a.file:
         src = os.path.abspath(os.path.expanduser(a.file))
+        bg = a.swap and cfg["depth"]["notify"] and depth.wanted(src, cfg)
+        if bg:                             # background job from apply(): tell the user why the fans spin
+            depth.notify("Creating 3D cutout", f"{os.path.basename(src)} — this can take a while on CPU")
         out = depth.run(src, cfg, force=a.force, quiet=not a.verbose)
         if out and a.swap:
             backend.cutout_ready(src, cfg)
+        if bg:
+            depth.notify("3D cutout ready" if out else "No subject found",
+                         os.path.basename(src) + ("" if out else " — widgets stay on top"))
         print(out or "no subject found / not set up")
         return
-    depth.run_all(cfg, force=a.force)
-    overlay.write_state(cfg)              # the current wallpaper's cutout may just have appeared
+    if a.action == "all":
+        rc = depth.run_all(cfg, force=a.force, yes=a.yes)
+        overlay.write_state(cfg)           # the current wallpaper's cutout may just have appeared
+        return rc
+    print(depth.status_text(cfg))
 
 
 def _cmd_overlay(a, cfg):
@@ -210,6 +231,16 @@ def _cmd_config(a, cfg):
             hypr.install(config.load()); hypr.reload()
         if any(k.startswith(("overlay.", "depth.")) for k in keys):
             overlay.ensure(config.load())      # live: the overlay watches its state file
+        if "depth.auto" in keys and cfg["depth"]["auto"]:
+            print("! depth.auto: `wallflow watch` will now segment every new image in the background "
+                  "(and any image still missing a cutout) — slow on CPU, you'll get a notification "
+                  "while it runs. Restarting the watcher.")
+            subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
+            try:
+                subprocess.Popen([paths.launcher_cmd(), "watch"], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                print("  (start it with `wallflow watch` — launcher not found)")
     elif a.action == "edit":
         if not paths.CONFIG_FILE.exists():
             config.save(cfg)
@@ -279,8 +310,10 @@ def build_parser():
     x.add_argument("-v", "--verbose", action="store_true")
     x.set_defaults(fn=_cmd_transcode)
 
-    x = sp.add_parser("depth", help="subject cutouts for the overlay (rembg in its own venv)")
-    x.add_argument("action", nargs="?", choices=["setup"])
+    x = sp.add_parser("depth", help="3D subject cutouts for the overlay (rembg in its own venv)")
+    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off"])
+    x.add_argument("name", nargs="?", help="on/off: image file (default: current wallpaper)")
+    x.add_argument("--yes", "-y", action="store_true", help="all: skip the 'this takes long' prompt")
     x.add_argument("--gpu", action="store_true", help="setup: onnxruntime-gpu (needs CUDA/cuDNN)")
     x.add_argument("--python", default="", help="setup: interpreter for the venv, e.g. python3.12")
     x.add_argument("--file", help="one image instead of the whole folder")
@@ -294,6 +327,10 @@ def build_parser():
     x.add_argument("action", nargs="?", default="status",
                    choices=["start", "stop", "restart", "status", "edit", "done"])
     x.set_defaults(fn=_cmd_overlay)
+    sp.add_parser("3d", help="alias for `wallflow depth all`").set_defaults(
+        fn=lambda a, cfg: _cmd_depth(argparse.Namespace(action="all", name=None, yes=False, gpu=False,
+                                                         python="", file=None, swap=False, force=False,
+                                                         prune=False, verbose=False), cfg))
 
     x = sp.add_parser("rename", help="rename wallpapers per [rename].mode (0 off / 1 prefix / 2 full)")
     x.add_argument("--dry-run", action="store_true", help="print planned renames without touching files")

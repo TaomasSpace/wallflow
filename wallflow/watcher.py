@@ -106,10 +106,24 @@ def _prewarm(cfg: dict) -> None:
     for f in files:
         if config.is_video(cfg, f) and transcode.wanted(f, cfg):
             transcode.run(f, cfg)
-    if cfg["depth"]["prewarm"]:                  # off by default: CPU segmentation of a whole folder
-        for f in files:
-            if depth.wanted(f, cfg):
-                depth.run(f, cfg)
+
+
+def _auto_depth(cfg: dict) -> None:
+    """depth.auto: segment every image that has no cutout yet (i.e. new ones, plus a
+    backlog on first enable). Slow on CPU, hence the notifications."""
+    todo = depth.pending(cfg)
+    if not todo:
+        return
+    if cfg["depth"]["notify"]:
+        depth.notify("Creating 3D cutouts", f"{len(todo)} new wallpaper(s) — this can take a while on CPU")
+    done = 0
+    for f in todo:
+        if depth.run(f, cfg, wait=True):
+            done += 1
+            if f == backend.read_current():
+                backend.cutout_ready(f, cfg)
+    if cfg["depth"]["notify"]:
+        depth.notify("3D cutouts done", f"{done} of {len(todo)} wallpaper(s) got a subject cutout")
 
 
 def _trigger() -> None:
@@ -120,6 +134,8 @@ def _trigger() -> None:
             rename.apply(ops)
     if cfg["general"]["auto_prewarm"]:
         _prewarm(cfg)
+    if cfg["depth"]["auto"]:
+        _auto_depth(cfg)
 
 
 def _schedule() -> None:
@@ -139,7 +155,7 @@ def _is_relevant(name: str, cfg: dict) -> bool:
 def main() -> None:
     _lock = _single_instance()
     cfg = config.load()
-    if cfg["rename"]["mode"] == 0 and not cfg["general"]["auto_prewarm"]:
+    if cfg["rename"]["mode"] == 0 and not cfg["general"]["auto_prewarm"] and not cfg["depth"]["auto"]:
         return
     fd = _inotify_init()
     wds = _watch_tree(fd, cfg)

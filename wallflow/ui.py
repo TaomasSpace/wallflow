@@ -1,7 +1,7 @@
 """The coverflow picker (PySide6 + QML). Only imported by `wallflow ui`."""
 import sys
 
-from . import backend, config, thumbs
+from . import backend, config, depth, thumbs
 
 QML = r"""
 import QtQuick
@@ -11,6 +11,10 @@ Window {
     id: win
     flags: Qt.FramelessWindowHint
     color: backdrop
+    property var depthOn: ({})          // path -> bool, overrides modelData.depth after a toggle
+    function depthState(item) {
+        return item.full in win.depthOn ? win.depthOn[item.full] : item.depth
+    }
 
     Text {
         anchors.horizontalCenter: parent.horizontalCenter
@@ -46,6 +50,14 @@ Window {
             else if (event.key === Qt.Key_End) view.currentIndex = view.count - 1
             else if (event.key === Qt.Key_R && view.count > 0)
                 view.currentIndex = Math.floor(Math.random() * view.count)
+            else if (event.key === Qt.Key_D && view.count > 0 && depthAvailable) {
+                const it = wallpapers[view.currentIndex]
+                if (!it.video) {
+                    const m = Object.assign({}, win.depthOn)
+                    m[it.full] = backend.toggleDepth(it.full)
+                    win.depthOn = m
+                }
+            }
         }
 
         function applyCurrent() {
@@ -126,6 +138,22 @@ Window {
                 Text { anchors.centerIn: parent; text: "\u25B6"; color: "white"; font.pixelSize: 15 }
             }
 
+            Rectangle {                       // "3D" badge (cutout on for this image)
+                visible: depthAvailable && !modelData.video
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: 14
+                width: 44; height: 26; radius: 6
+                color: win.depthState(modelData) ? "#cc000000" : "#66000000"
+                border.color: win.depthState(modelData) ? "#80ffffff" : "#30ffffff"
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "3D"; font.pixelSize: 13; font.bold: true
+                    color: win.depthState(modelData) ? "white" : "#60ffffff"
+                }
+            }
+
             Text {                            // filename under the centre card
                 visible: view.currentIndex === index
                 anchors.top: parent.bottom
@@ -156,7 +184,8 @@ Window {
         anchors.bottomMargin: 24
         color: "#aaffffff"
         font.pixelSize: 13
-        text: "\u2190 / \u2192  browse   \u00b7   Enter  apply   \u00b7   R  random   \u00b7   Esc  cancel"
+        text: "\u2190 / \u2192  browse   \u00b7   Enter  apply   \u00b7   R  random"
+              + (depthAvailable ? "   \u00b7   D  3D on/off" : "") + "   \u00b7   Esc  cancel"
     }
 }
 """
@@ -242,13 +271,26 @@ def run(cfg: dict, include_hidden: bool = False) -> int:
         def apply(self, path: str) -> None:
             backend.apply(path, cfg)
 
+        @Slot(str, result=bool)
+        def toggleDepth(self, path: str) -> bool:
+            on = not depth.enabled_for(path)
+            depth.set_enabled(path, on)
+            if path == backend.read_current():
+                if on and depth.wanted(path, cfg):
+                    backend._spawn_background_cutout(path)
+                from . import overlay
+                overlay.ensure(cfg)
+            return on
+
     app = QGuiApplication(sys.argv[:1])
     app.setDesktopFileName(APP_ID)          # -> Wayland app_id / Hyprland class
     files = backend.gather_wallpapers(cfg, include_hidden=include_hidden)
     if not files:
         print(f"No wallpapers found in {config.wallpaper_dir(cfg)}", file=sys.stderr)
+    off = depth.disabled()
     items = [{"full": f, "thumb": thumbs.thumb_for(f, cfg),
-              "video": config.is_video(cfg, f), "name": os.path.basename(f)} for f in files]
+              "video": config.is_video(cfg, f), "name": os.path.basename(f),
+              "depth": f not in off} for f in files]
 
     current = backend.read_current()
     start = next((i for i, it in enumerate(items) if it["full"] == current), 0)
@@ -261,6 +303,7 @@ def run(cfg: dict, include_hidden: bool = False) -> int:
     ctx.setContextProperty("startIndex", start)
     ctx.setContextProperty("thumbWidth", int(cfg["ui"]["thumb_width"]))
     ctx.setContextProperty("backdrop", cfg["ui"]["backdrop"])
+    ctx.setContextProperty("depthAvailable", bool(cfg["depth"]["enabled"] and depth.ready()))
     engine.loadData(QML.encode("utf-8"))
     if not engine.rootObjects():
         print("Failed to load QML.", file=sys.stderr)

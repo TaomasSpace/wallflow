@@ -16,6 +16,7 @@ RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
 CONFIG_DIR = CONFIG_HOME / "wallflow"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 ADDON_STATE_DIR = CONFIG_DIR / "addons"          # one <name>.json per installed addon
+DEPTH_OFF_FILE = CONFIG_DIR / "depth-off.json"   # wallpapers with the 3D cutout switched off
 
 CACHE_DIR = CACHE_HOME / "wallflow"
 STATE_FILE = CACHE_DIR / "current"               # path of the last applied wallpaper

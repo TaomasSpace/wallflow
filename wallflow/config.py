@@ -65,7 +65,8 @@ DEFAULTS: dict = {
         "enabled": True,
         "model": "isnet-anime",       # rembg model: isnet-anime | isnet-general-use | u2net | birefnet-general
         "alpha_matting": False,       # finer edges (hair), several times slower
-        "prewarm": False,             # let `wallflow watch` segment every image ahead of time
+        "auto": False,                # `wallflow watch` segments new images as they appear (slow on CPU!)
+        "notify": True,               # desktop notification while a cutout is being made in the background
     },
     "overlay": {
         # the click-through layer between wallpaper and windows (quickshell)

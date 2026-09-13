@@ -33,6 +33,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow addons list` | show addons; `install <name>` / `remove <name>` / `info <name>` |
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
 | `wallflow depth setup` | once: install the segmentation venv, so widgets can sit *behind* the wallpaper's subject |
+| `wallflow depth all` | segment every image now (`wallflow 3d`); `depth on|off [file]` per image; `depth` = status |
 | `wallflow overlay` | `start` / `stop` / `restart` / `status` of the widget + subject layer; `edit` = drag widgets |
 | `wallflow rename [--dry-run]` | rename wallpapers per `rename.mode` (0 off / 1 prefix / 2 full) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
@@ -110,12 +111,22 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   `~/.cache/wallflow/overlay.json`, which wallflow rewrites on every wallpaper change and every
   `wallflow config set overlay.*` — so moving the clock is live, no restart.
 - **Cutouts** come from [rembg](https://github.com/danielgatis/rembg) (`isnet-anime` by default,
-  `depth.model`) in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
-  dependency-light. Made lazily in the background the first time an image is applied (a few seconds
-  on CPU; `--gpu` at setup for onnxruntime-gpu), cached by path+mtime+model like transcodes, and
-  fade in when done. Images with no discernible subject (landscapes) get a `.skip` marker and the
-  widgets simply sit on top. `wallflow depth` pre-segments the whole folder, `--prune` cleans up,
-  `depth.prewarm = true` lets `wallflow watch` do it ahead of time.
+  `depth.model`; `birefnet-general` + `depth.alpha_matting = true` gives the cleanest edges on
+  photo-like renders) in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
+  dependency-light. Made lazily in the background the first time an image is applied (you get a
+  notification while it runs, `depth.notify`), cached by path+mtime+model like transcodes, and fade in
+  when done. Images with no discernible subject (landscapes) get a `.skip` marker and the widgets
+  simply sit on top.
+- **Timing**: seconds per image with `isnet-*` on CPU, up to a couple of minutes with birefnet +
+  matting at 4K. `wallflow depth setup --gpu` (needs `cuda` + `cudnn`) makes it near-instant.
+- **All at once**: `wallflow depth all` (alias `wallflow 3d`) segments every image that has no cutout
+  yet — it tells you how many and that it may take long, asks once, then shows progress + ETA.
+  Ctrl-C keeps what's done. `wallflow depth` shows the status, `--prune` cleans up.
+- **Per image**: `wallflow depth off [file]` / `on` (default: current wallpaper), or press `D` on a
+  card in the picker — the `3D` badge shows the state.
+- **New images automatically**: `wallflow config set depth.auto true` — `wallflow watch` then
+  segments new wallpapers in the background as they land in the folder (with a notification, since
+  it's slow on CPU).
 - **Videos / GIFs** get no cutout in v1 (that would need a per-frame matte) — widgets sit on top.
 - **Moving widgets**: `wallflow overlay edit` (or a bind: `hypr.bind_edit = "SUPER + SHIFT + W"`)
   lifts the overlay above your windows and makes widgets draggable; drop writes the position to
@@ -182,7 +193,7 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
-[depth]    enabled, model = "isnet-anime", alpha_matting, prewarm — subject cutouts (needs `wallflow depth setup`)
+[depth]    enabled, model = "isnet-anime", alpha_matting, auto, notify — subject cutouts (needs `wallflow depth setup`)
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows

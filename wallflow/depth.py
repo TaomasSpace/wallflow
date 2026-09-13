@@ -16,9 +16,12 @@ images where no subject was found (landscapes).
 """
 import fcntl
 import hashlib
+import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import config, paths
@@ -85,6 +88,33 @@ def setup(gpu: bool = False, python: str = "", log=print) -> int:
     return 0
 
 
+# --- per-image on/off --------------------------------------------------------
+
+def disabled() -> set[str]:
+    try:
+        return set(json.loads(paths.DEPTH_OFF_FILE.read_text()))
+    except (OSError, ValueError):
+        return set()
+
+
+def set_enabled(src: str, on: bool) -> None:
+    src = os.path.abspath(src)
+    off = disabled()
+    (off.discard if on else off.add)(src)
+    paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    paths.DEPTH_OFF_FILE.write_text(json.dumps(sorted(off), indent=2))
+
+
+def enabled_for(src: str) -> bool:
+    return os.path.abspath(src) not in disabled()
+
+
+def notify(title: str, body: str = "", urgency: str = "low") -> None:
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "-a", "wallflow", "-u", urgency, title, body],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 # --- cache -----------------------------------------------------------------
 
 def target(src: str, cfg: dict) -> Path:
@@ -95,8 +125,13 @@ def target(src: str, cfg: dict) -> Path:
 
 
 def applicable(src: str, cfg: dict) -> bool:
-    """Only still images get a cutout (GIF counts as video)."""
-    return cfg["depth"]["enabled"] and not config.is_video(cfg, src)
+    """Only still images get a cutout (GIF counts as video), and only if not switched
+    off for this image (`wallflow depth off <file>`)."""
+    return cfg["depth"]["enabled"] and not config.is_video(cfg, src) and enabled_for(src)
+
+
+def is_image(src: str, cfg: dict) -> bool:
+    return not config.is_video(cfg, src)
 
 
 def existing(src: str, cfg: dict) -> str | None:
@@ -159,19 +194,79 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
         lock_fh.close()
 
 
-def run_all(cfg: dict, force: bool = False, log=print) -> None:
+def pending(cfg: dict, force: bool = False) -> list[str]:
+    """Images that would be segmented by `wallflow depth all`."""
     from .backend import gather_wallpapers
-    imgs = [f for f in gather_wallpapers(cfg) if applicable(f, cfg)]
+    return [f for f in gather_wallpapers(cfg, include_hidden=True)
+            if applicable(f, cfg) and (force or wanted(f, cfg))]
+
+
+def _fmt_secs(s: float) -> str:
+    s = int(round(s))
+    return f"{s // 60}m {s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def run_all(cfg: dict, force: bool = False, yes: bool = False, log=print) -> int:
+    """`wallflow depth all` — segment every image that has no cutout yet. Slow on
+    CPU (seconds to minutes per image with birefnet + alpha matting), so it says so,
+    asks once, and then shows progress + a running ETA."""
     if not ready():
         log("depth is not set up — run `wallflow depth setup`")
-        return
-    for i, f in enumerate(imgs, 1):
-        if not force and not wanted(f, cfg):
-            log(f"[{i}/{len(imgs)}] cached      {os.path.basename(f)}")
-            continue
-        log(f"[{i}/{len(imgs)}] segmenting  {os.path.basename(f)} …")
-        res = run(f, cfg, force=force, quiet=False)
-        log(f"          -> {'ok' if res else 'no subject found (skipped)'}")
+        return 1
+    todo = pending(cfg, force)
+    if not todo:
+        log("nothing to do — every image already has a cutout (or is switched off)")
+        return 0
+    d = cfg["depth"]
+    log(f"{len(todo)} image(s) to segment with {d['model']}"
+        f"{' + alpha matting' if d['alpha_matting'] else ''}.")
+    log("! This can take a LONG time on CPU — roughly 5 s to 2 min per image depending on "
+        "model, matting and resolution. It runs in the foreground; Ctrl-C stops it, "
+        "finished cutouts are kept and it resumes where it left off next time.")
+    if not yes and sys.stdin.isatty():
+        if input("continue? [y/N] ").strip().lower() not in ("y", "yes"):
+            log("aborted")
+            return 1
+    t0 = time.monotonic()
+    done_n = 0
+    for i, f in enumerate(todo, 1):
+        name = os.path.basename(f)
+        eta = ""
+        if done_n:
+            per = (time.monotonic() - t0) / done_n
+            eta = f"  (ETA {_fmt_secs(per * (len(todo) - i + 1))})"
+        log(f"[{i}/{len(todo)}] {name} …{eta}", end="", flush=True)
+        t1 = time.monotonic()
+        res = run(f, cfg, force=force, quiet=True, wait=True)
+        done_n += 1
+        log(f"  {'ok' if res else 'no subject (skipped)'}  {_fmt_secs(time.monotonic() - t1)}")
+    log(f"done: {len(todo)} image(s) in {_fmt_secs(time.monotonic() - t0)}")
+    return 0
+
+
+def status_text(cfg: dict) -> str:
+    from .backend import gather_wallpapers, read_current
+    imgs = [f for f in gather_wallpapers(cfg, include_hidden=True) if is_image(f, cfg)]
+    off = disabled()
+    have = sum(1 for f in imgs if existing(f, cfg))
+    skipped = sum(1 for f in imgs if applicable(f, cfg) and target(f, cfg).with_suffix(".skip").exists())
+    cur = read_current()
+    d = cfg["depth"]
+    lines = [
+        f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
+        f"model    : {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
+        f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",
+        f"images   : {len(imgs)} total, {have} with cutout, {skipped} without subject, "
+        f"{len([f for f in imgs if f in off])} switched off, {len(pending(cfg))} pending",
+    ]
+    if cur:
+        state = ("video — no cutout" if config.is_video(cfg, cur) else
+                 "off for this image" if cur in off else
+                 "cutout ready" if existing(cur, cfg) else
+                 "no subject found" if target(cur, cfg).with_suffix(".skip").exists() else "pending")
+        lines.append(f"current  : {os.path.basename(cur)} — {state}")
+    lines.append("           wallflow depth all | on|off [<file>] | --file <f> | --prune")
+    return "\n".join(lines)
 
 
 def prune(cfg: dict) -> int:

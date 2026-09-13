@@ -93,7 +93,7 @@ def run(args) -> int:
 
     # --- (re)start the folder watcher — restart always, to pick up wallpaper_dir
     # / recursive changes; it exits immediately if mode is 0 and prewarm is off ---
-    need_watch = mode != 0 or cfg["general"]["auto_prewarm"]
+    need_watch = mode != 0 or cfg["general"]["auto_prewarm"] or cfg["depth"]["auto"]
     subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
     if need_watch:
         subprocess.Popen([paths.launcher_cmd(), "watch"], start_new_session=True,
