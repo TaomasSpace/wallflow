@@ -111,12 +111,16 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   `~/.cache/wallflow/overlay.json`, which wallflow rewrites on every wallpaper change and every
   `wallflow config set overlay.*` — so moving the clock is live, no restart.
 - **What lands on the 3D layer** (`depth.mode`):
-  - `depth` (default) — whatever is *nearest to the camera*, from a monocular depth map
-    ([Depth Anything V2](https://huggingface.co/onnx-community/depth-anything-v2-small), ONNX). A fan
-    in the corner, the wall you're sitting on, foam drifting over a face — not necessarily the
-    character. `depth.near` = how much of the depth range counts as foreground (0.3 = nearest 30 %),
-    `depth.feather` = softness of the cut; edges are snapped to the image with a guided filter. The
-    depth map is cached separately, so retuning `near`/`feather` is fast — `wallflow config set
+  - `auto` (default) — a monocular depth map
+    ([Depth Anything V2](https://huggingface.co/onnx-community/depth-anything-v2-small), ONNX) is
+    split into near/far *per image* from its histogram (Otsu), so a fan in the corner, the wall
+    you're sitting on or foam drifting over a face ends up in front regardless of how the picture's
+    depth range is distributed. Then the subject model (rembg) checks where the character sits: in the
+    front group → the whole character is kept (union); behind it → depth only. Smooth landscapes
+    with no distinct foreground and no character are skipped (`depth.min_separation`).
+  - `depth` — the near group only. `depth.near = "auto"` or a number (0.3 = nearest 30 % of the
+    range), `depth.feather` = softness of the cut; edges are snapped to the image with a guided
+    filter. The depth map is cached separately, so retuning is fast — `wallflow config set
     depth.near 0.4` recomputes the current wallpaper in the background.
   - `subject` — the salient subject/character via [rembg](https://github.com/danielgatis/rembg)
     (`depth.model`: `isnet-anime`, or `birefnet-general` + `depth.alpha_matting = true` for the
@@ -207,7 +211,7 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
-[depth]    enabled, mode = "depth"|"subject"|"both", near, feather, depth_model, model, alpha_matting, auto, notify
+[depth]    enabled, mode = "auto"|"depth"|"subject"|"both", near ("auto"|0..1), feather, min_separation, depth_model, model, alpha_matting, auto, notify
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows

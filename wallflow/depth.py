@@ -33,8 +33,10 @@ import sys, os
 from io import BytesIO
 import numpy as np
 from PIL import Image
-src, dst, mode, near, feather, smodel, dmodel, am, dmap = sys.argv[1:10]
-near, feather = float(near), float(feather)
+src, dst, mode, near, feather, smodel, dmodel, am, dmap, minsep = sys.argv[1:11]
+auto_near = str(near).lower() == "auto"
+near = None if auto_near else float(near)
+feather = float(feather); minsep = float(minsep)
 img = Image.open(src).convert("RGB")
 W, H = img.size
 rgb = np.asarray(img)
@@ -55,10 +57,27 @@ def guided(alpha, guide, r, eps):
     a = cov / (var + eps); b = mp - a * mI
     return np.clip(box(a, r) * guide + box(b, r), 0, 1)
 
-def depth_alpha():
+def otsu(d):
+    # threshold that best splits the depth histogram into two groups; also returns
+    # how well it splits (between-class / total variance, 0..1 — low = smooth gradient,
+    # i.e. no distinct foreground)
+    h, edges = np.histogram(d, bins=256, range=(0.0, 1.0))
+    h = h.astype(np.float64); p = h / h.sum()
+    w0 = np.cumsum(p); mu = np.cumsum(p * np.arange(256))
+    muT = mu[-1]
+    w1 = 1.0 - w0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sb = (muT * w0 - mu) ** 2 / (w0 * w1)
+    sb[~np.isfinite(sb)] = 0
+    ks = np.flatnonzero(sb >= sb.max() - 1e-9)   # a flat maximum = an empty gap: cut in its middle
+    k = (ks[0] + ks[-1]) / 2.0
+    var = ((np.arange(256) - muT) ** 2 * p).sum()
+    return (k + 0.5) / 256.0, float(sb.max() / var) if var > 0 else 0.0
+
+def load_depth():
     if os.path.exists(dmap):
-        d = np.load(dmap).astype(np.float32)
-    else:
+        return np.load(dmap).astype(np.float32)
+    if True:
         import onnxruntime as ort
         from huggingface_hub import hf_hub_download
         path = hf_hub_download(dmodel, "onnx/model.onnx")
@@ -81,8 +100,20 @@ def depth_alpha():
         out = (out - out.min()) / (out.max() - out.min() + 1e-6)   # relative inverse depth: 1 = nearest
         d = np.asarray(Image.fromarray(out, "F").resize((W, H), Image.BILINEAR), np.float32)
         np.save(dmap, d.astype(np.float16))
-    t = 1.0 - near
-    a = np.clip((d - t) / max(feather, 1e-3) + 0.5, 0, 1)
+        return d
+
+threshold = None      # the depth value actually used as the near/far cut (for the preview)
+separation = 1.0
+
+def depth_alpha(d):
+    global threshold, separation
+    if auto_near:
+        # look at a downscaled copy: cheaper, and it de-emphasises thin edge artefacts
+        small = np.asarray(Image.fromarray(d, "F").resize((max(1, W // 8), max(1, H // 8))), np.float32)
+        threshold, separation = otsu(small)
+    else:
+        threshold = 1.0 - near
+    a = np.clip((d - threshold) / max(feather, 1e-3) + 0.5, 0, 1)
     guide = (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)) / 255.0
     r = max(4, int(round(0.004 * max(W, H))))
     return guided(a, guide, r, 1e-3)
@@ -98,12 +129,35 @@ def subject_alpha():
 preview = mode.startswith("preview:")
 if preview:
     mode = mode.split(":", 1)[1]
+decision = mode
 if mode == "subject":
     alpha = subject_alpha()
 elif mode == "both":
-    alpha = np.maximum(depth_alpha(), subject_alpha())
+    alpha = np.maximum(depth_alpha(load_depth()), subject_alpha())
+elif mode == "auto":
+    # depth decides what is in front; the subject model decides whether the
+    # character belongs to that front group (fan picture: yes -> union, keeps the
+    # whole character even where depth is ambiguous) or sits behind it (foam over a
+    # face, grass in front of a silhouette: no -> depth only)
+    d = load_depth()
+    da = depth_alpha(d)
+    sa = subject_alpha()
+    if auto_near and separation < minsep and (sa > 0.5).sum() < 0.005 * W * H:
+        decision = "nothing distinct in front"
+        alpha = np.zeros_like(da)
+    elif (sa > 0.5).sum() >= 0.005 * W * H:
+        subj_depth = float(np.median(d[sa > 0.5]))
+        if subj_depth >= threshold - 0.08:
+            decision = "auto: character is in front -> depth + subject"
+            alpha = np.maximum(da, sa)
+        else:
+            decision = "auto: character is behind the foreground -> depth only"
+            alpha = da
+    else:
+        decision = "auto: no character found -> depth only"
+        alpha = da
 else:
-    alpha = depth_alpha()
+    alpha = depth_alpha(load_depth())
 
 if preview:
     # left: the depth map (bright = near) with the current threshold as a red band;
@@ -113,15 +167,19 @@ if preview:
     d = np.load(dmap).astype(np.float32) if os.path.exists(dmap) else np.zeros((H, W), np.float32)
     dm = np.asarray(Image.fromarray((d * 255).astype(np.uint8)).resize((pw, ph)), np.uint8)
     left = np.dstack([dm, dm, dm]).astype(np.float32)
-    band = (np.abs(np.asarray(Image.fromarray(d, "F").resize((pw, ph)), np.float32) - (1.0 - near)) < 0.01)
-    left[band] = [255, 40, 40]
+    if threshold is not None:
+        band = (np.abs(np.asarray(Image.fromarray(d, "F").resize((pw, ph)), np.float32) - threshold) < 0.01)
+        left[band] = [255, 40, 40]
+    print(f"threshold {threshold if threshold is None else round(threshold, 3)}  "
+          f"separation {separation:.2f}  {decision}")
     small = np.asarray(img.resize((pw, ph)), np.float32)
     a = np.asarray(Image.fromarray(alpha, "F").resize((pw, ph)), np.float32)[..., None]
     right = small * a + np.array([40, 200, 60], np.float32) * (1 - a)
-    both = np.concatenate([left, right], 1).astype(np.uint8)
+    both = np.nan_to_num(np.concatenate([left, right], 1)).clip(0, 255).astype(np.uint8)
     Image.fromarray(both).save(dst, "PNG")
     sys.exit(0)
 
+print(decision)
 if (alpha > 0.06).sum() < 0.005 * W * H:      # < 0.5 %: nothing worth occluding with
     sys.exit(3)
 out = np.dstack([rgb, (alpha * 255 + 0.5).astype(np.uint8)])
@@ -199,7 +257,7 @@ def enabled_for(src: str) -> bool:
 # floor, a portrait's is the nose. `wallflow depth tune near=0.5 mode=both [file]`
 # overrides any [depth] key for that image only.
 
-TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model")
+TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model", "min_separation")
 
 
 def tunes() -> dict[str, dict]:
@@ -243,10 +301,13 @@ def target(src: str, cfg: dict) -> Path:
     st = os.stat(src)
     d = settings(src, cfg)
     key = f"{src}:{st.st_mtime_ns}:{d['mode']}"
-    if d["mode"] in ("subject", "both"):
+    if d["mode"] in ("subject", "both", "auto"):
         key += f":{d['model']}:{int(bool(d['alpha_matting']))}"
-    if d["mode"] in ("depth", "both"):
-        key += f":{d['depth_model']}:{float(d['near']):.3f}:{float(d['feather']):.3f}"
+    if d["mode"] in ("depth", "both", "auto"):
+        near = d["near"]
+        key += f":{d['depth_model']}:{near if isinstance(near, str) else f'{float(near):.3f}'}:{float(d['feather']):.3f}"
+    if d["mode"] == "auto":
+        key += f":{float(d['min_separation']):.2f}"
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
@@ -313,7 +374,9 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
         cmd = _worker_cmd(src, str(tmp), cfg)
         global last_error
         last_error = ""
-        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if not quiet and r.stdout.strip():
+            print(r.stdout.strip())
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             skip.unlink(missing_ok=True)
             tmp.replace(dst)
@@ -348,7 +411,8 @@ def _worker_cmd(src: str, dst: str, cfg: dict, preview: bool = False) -> list[st
     return [str(venv_python()), "-c", _WORKER, src, dst,
             ("preview:" if preview else "") + d["mode"],
             str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
-            "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg))]
+            "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg)),
+            str(d["min_separation"])]
 
 
 def preview(src: str, cfg: dict, log=print) -> Path | None:
@@ -359,13 +423,13 @@ def preview(src: str, cfg: dict, log=print) -> Path | None:
     paths.CUTOUT_DIR.mkdir(parents=True, exist_ok=True)
     out = paths.CACHE_DIR / "depth-preview.png"
     r = subprocess.run(_worker_cmd(src, str(out), cfg, preview=True),
-                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if r.returncode != 0:
         log(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"preview failed ({r.returncode})")
         return None
     d = settings(src, cfg)
-    log(f"{out}   mode {d['mode']}, near {d['near']}, feather {d['feather']}  "
-        "(left: depth map, bright = near, red = threshold · right: the cutout)")
+    log(f"{out}\n  mode {d['mode']}, near {d['near']}, feather {d['feather']} -> {r.stdout.strip()}\n"
+        "  (left: depth map, bright = near, red = threshold · right: the cutout)")
     if shutil.which("xdg-open"):
         subprocess.Popen(["xdg-open", str(out)], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -434,7 +498,7 @@ def status_text(cfg: dict) -> str:
     d = cfg["depth"]
     lines = [
         f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
-        f"mode     : {d['mode']}  (depth = what's nearest, subject = the character, both = union)",
+        f"mode     : {d['mode']}  (auto = depth decides, subject model checks the character · depth · subject · both)",
         f"models   : depth {d['depth_model']} (near {d['near']}, feather {d['feather']})"
         f" · subject {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
         f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",

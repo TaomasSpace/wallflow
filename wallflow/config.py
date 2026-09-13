@@ -64,14 +64,19 @@ DEFAULTS: dict = {
         # foreground cutout for the overlay (needs `wallflow depth setup` once; no-op until then)
         "enabled": True,
         # what goes on the 3D layer:
-        #   "depth"   = whatever is nearest to the camera (Depth Anything V2) — a fan in the
-        #               corner, a wall in front, foam over a face, …
+        #   "auto"    = depth map (Depth Anything V2) split into near/far per image (Otsu);
+        #               the subject model (rembg) then decides whether the character belongs
+        #               to the front group (-> whole character kept) or sits behind it
+        #   "depth"   = the near group only, no character logic
         #   "subject" = the salient subject/character (rembg), regardless of depth
-        #   "both"    = union of the two
-        "mode": "depth",
+        #   "both"    = union of depth and subject
+        "mode": "auto",
         "depth_model": "onnx-community/depth-anything-v2-small",   # …-base / …-large: better, slower
-        "near": 0.30,                 # fraction of the depth range (from the nearest point) that counts as foreground
-        "feather": 0.08,              # softness of the near/far boundary (fraction of the depth range)
+        "near": "auto",               # "auto" = per-image histogram split; or a number = fraction of the
+                                      # depth range from the nearest point (0.3 = nearest 30 %)
+        "feather": 0.06,              # softness of the near/far boundary (fraction of the depth range)
+        "min_separation": 0.30,       # auto: below this near/far distinctness (0..1) and with no character,
+                                      # the image is treated as having nothing in front (smooth landscapes)
         "model": "isnet-anime",       # rembg model for subject/both: isnet-anime | isnet-general-use | birefnet-general
         "alpha_matting": False,       # subject/both: finer edges (hair), several times slower
         "auto": False,                # `wallflow watch` segments new images as they appear (slow on CPU!)
