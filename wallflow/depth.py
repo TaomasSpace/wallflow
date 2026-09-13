@@ -33,10 +33,10 @@ import sys, os
 from io import BytesIO
 import numpy as np
 from PIL import Image
-src, dst, mode, near, feather, smodel, dmodel, am, dmap, minsep = sys.argv[1:11]
+src, dst, mode, near, feather, smodel, dmodel, am, dmap, minsep, margin = sys.argv[1:12]
 auto_near = str(near).lower() == "auto"
 near = None if auto_near else float(near)
-feather = float(feather); minsep = float(minsep)
+feather = float(feather); minsep = float(minsep); margin = float(margin)
 img = Image.open(src).convert("RGB")
 W, H = img.size
 rgb = np.asarray(img)
@@ -135,10 +135,36 @@ if mode == "subject":
 elif mode == "both":
     alpha = np.maximum(depth_alpha(load_depth()), subject_alpha())
 elif mode == "auto":
+    # subject first: the salient object (character, bike, mountain) is the layer;
+    # depth only ADDS what is clearly nearer than the subject's own nearest parts
+    # (a fan in front of the character, grass or foam in front of a face). Floors
+    # and walls the subject stands on are about as near as the subject -> excluded.
+    d = load_depth()
+    sa = subject_alpha()
+    if (sa > 0.5).sum() >= 0.005 * W * H:
+        q = float(np.percentile(d[sa > 0.5], 80))
+        threshold = min(1.0, q + margin)
+        occ = np.clip((d - threshold) / max(feather, 1e-3) + 0.5, 0, 1)
+        guide = (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)) / 255.0
+        occ = guided(occ, guide, max(4, int(round(0.004 * max(W, H)))), 1e-3)
+        share = float((occ > 0.5).sum()) / (W * H)
+        if share >= 0.003:
+            decision = f"auto: subject + {share * 100:.1f}% of the image nearer than it"
+            alpha = np.maximum(sa, occ)
+        else:
+            decision = "auto: subject only (nothing nearer than it)"
+            alpha = sa
+    else:
+        da = depth_alpha(d)
+        if auto_near and separation < minsep:
+            decision = "auto: no subject, no distinct foreground -> nothing"
+            alpha = np.zeros_like(da)
+        else:
+            decision = "auto: no subject found -> nearest depth group"
+            alpha = da
+elif mode == "near":
     # depth decides what is in front; the subject model decides whether the
-    # character belongs to that front group (fan picture: yes -> union, keeps the
-    # whole character even where depth is ambiguous) or sits behind it (foam over a
-    # face, grass in front of a silhouette: no -> depth only)
+    # character belongs to that front group (-> union) or sits behind it (-> depth only)
     d = load_depth()
     da = depth_alpha(d)
     sa = subject_alpha()
@@ -148,13 +174,13 @@ elif mode == "auto":
     elif (sa > 0.5).sum() >= 0.005 * W * H:
         subj_depth = float(np.median(d[sa > 0.5]))
         if subj_depth >= threshold - 0.08:
-            decision = "auto: character is in front -> depth + subject"
+            decision = "near: character is in front -> depth + subject"
             alpha = np.maximum(da, sa)
         else:
-            decision = "auto: character is behind the foreground -> depth only"
+            decision = "near: character is behind the foreground -> depth only"
             alpha = da
     else:
-        decision = "auto: no character found -> depth only"
+        decision = "near: no character found -> depth only"
         alpha = da
 else:
     alpha = depth_alpha(load_depth())
@@ -257,7 +283,8 @@ def enabled_for(src: str) -> bool:
 # floor, a portrait's is the nose. `wallflow depth tune near=0.5 mode=both [file]`
 # overrides any [depth] key for that image only.
 
-TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model", "min_separation")
+TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model", "min_separation",
+           "occluder_margin")
 
 
 def tunes() -> dict[str, dict]:
@@ -301,13 +328,15 @@ def target(src: str, cfg: dict) -> Path:
     st = os.stat(src)
     d = settings(src, cfg)
     key = f"{src}:{st.st_mtime_ns}:{d['mode']}"
-    if d["mode"] in ("subject", "both", "auto"):
+    if d["mode"] in ("subject", "both", "auto", "near"):
         key += f":{d['model']}:{int(bool(d['alpha_matting']))}"
-    if d["mode"] in ("depth", "both", "auto"):
+    if d["mode"] in ("depth", "both", "auto", "near"):
         near = d["near"]
         key += f":{d['depth_model']}:{near if isinstance(near, str) else f'{float(near):.3f}'}:{float(d['feather']):.3f}"
-    if d["mode"] == "auto":
+    if d["mode"] in ("auto", "near"):
         key += f":{float(d['min_separation']):.2f}"
+    if d["mode"] == "auto":
+        key += f":{float(d['occluder_margin']):.3f}"
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
@@ -412,7 +441,7 @@ def _worker_cmd(src: str, dst: str, cfg: dict, preview: bool = False) -> list[st
             ("preview:" if preview else "") + d["mode"],
             str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
             "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg)),
-            str(d["min_separation"])]
+            str(d["min_separation"]), str(d["occluder_margin"])]
 
 
 def preview(src: str, cfg: dict, log=print) -> Path | None:
@@ -498,7 +527,7 @@ def status_text(cfg: dict) -> str:
     d = cfg["depth"]
     lines = [
         f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
-        f"mode     : {d['mode']}  (auto = depth decides, subject model checks the character · depth · subject · both)",
+        f"mode     : {d['mode']}  (auto = subject + what's nearer than it · near = nearest depth group · depth · subject · both)",
         f"models   : depth {d['depth_model']} (near {d['near']}, feather {d['feather']})"
         f" · subject {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
         f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",

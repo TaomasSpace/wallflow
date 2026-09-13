@@ -64,9 +64,12 @@ DEFAULTS: dict = {
         # foreground cutout for the overlay (needs `wallflow depth setup` once; no-op until then)
         "enabled": True,
         # what goes on the 3D layer:
-        #   "auto"    = depth map (Depth Anything V2) split into near/far per image (Otsu);
-        #               the subject model (rembg) then decides whether the character belongs
-        #               to the front group (-> whole character kept) or sits behind it
+        #   "auto"    = the salient subject (rembg: character, bike, mountain …) plus whatever
+        #               the depth map (Depth Anything V2) says is clearly NEARER than the
+        #               subject (a fan in front of it, foam over a face) — floors/walls the
+        #               subject stands on are as near as the subject and stay out
+        #   "near"    = depth-first: the nearest depth group per image (Otsu split); the
+        #               subject model only decides whether the character joins it
         #   "depth"   = the near group only, no character logic
         #   "subject" = the salient subject/character (rembg), regardless of depth
         #   "both"    = union of depth and subject
@@ -75,8 +78,10 @@ DEFAULTS: dict = {
         "near": "auto",               # "auto" = per-image histogram split; or a number = fraction of the
                                       # depth range from the nearest point (0.3 = nearest 30 %)
         "feather": 0.06,              # softness of the near/far boundary (fraction of the depth range)
-        "min_separation": 0.30,       # auto: below this near/far distinctness (0..1) and with no character,
+        "min_separation": 0.30,       # auto/near: below this near/far distinctness (0..1) and with no subject,
                                       # the image is treated as having nothing in front (smooth landscapes)
+        "occluder_margin": 0.05,      # auto: how much nearer than the subject's nearest parts something must be
+                                      # to be added in front of it (bigger = only clear occluders)
         "model": "isnet-anime",       # rembg model for subject/both: isnet-anime | isnet-general-use | birefnet-general
         "alpha_matting": False,       # subject/both: finer edges (hair), several times slower
         "auto": False,                # `wallflow watch` segments new images as they appear (slow on CPU!)
