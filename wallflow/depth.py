@@ -109,6 +109,9 @@ Image.fromarray(out, "RGBA").save(dst, "PNG", optimize=False)
 """
 
 
+last_error = ""      # stderr tail of the last failed worker run (for callers that were quiet)
+
+
 # --- venv ------------------------------------------------------------------
 
 def venv_python() -> Path:
@@ -254,15 +257,20 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
         cmd = [str(venv_python()), "-c", _WORKER, src, str(tmp), d["mode"],
                str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
                "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg))]
-        out = subprocess.DEVNULL if quiet else None
-        r = subprocess.run(cmd, stdout=out, stderr=out)
+        global last_error
+        last_error = ""
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             skip.unlink(missing_ok=True)
             tmp.replace(dst)
             return dst
         tmp.unlink(missing_ok=True)
-        if r.returncode == 3:                 # ran fine, found no subject
+        if r.returncode == 3:                 # ran fine, found nothing in front
             skip.touch()
+            return None
+        last_error = (r.stderr or "").strip().splitlines()[-1:] and (r.stderr or "").strip().splitlines()[-1] or f"exit {r.returncode}"
+        if not quiet:
+            print(r.stderr, file=sys.stderr)
         return None
     finally:
         fcntl.flock(lock_fh, fcntl.LOCK_UN)
@@ -293,8 +301,10 @@ def run_all(cfg: dict, force: bool = False, yes: bool = False, log=print) -> int
         log("nothing to do — every image already has a cutout (or is switched off)")
         return 0
     d = cfg["depth"]
-    log(f"{len(todo)} image(s) to segment with {d['model']}"
-        f"{' + alpha matting' if d['alpha_matting'] else ''}.")
+    what = {"depth": f"depth ({d['depth_model'].split('/')[-1]}, near {d['near']})",
+            "subject": f"subject ({d['model']}{' + alpha matting' if d['alpha_matting'] else ''})"}
+    what["both"] = what["depth"] + " + " + what["subject"]
+    log(f"{len(todo)} image(s) to cut out, mode {what.get(d['mode'], d['mode'])}.")
     log("! This can take a LONG time on CPU — roughly 5 s to 2 min per image depending on "
         "model, matting and resolution. It runs in the foreground; Ctrl-C stops it, "
         "finished cutouts are kept and it resumes where it left off next time.")
@@ -303,7 +313,7 @@ def run_all(cfg: dict, force: bool = False, yes: bool = False, log=print) -> int
             log("aborted")
             return 1
     t0 = time.monotonic()
-    done_n = 0
+    done_n = failures = 0
     for i, f in enumerate(todo, 1):
         name = os.path.basename(f)
         eta = ""
@@ -314,9 +324,21 @@ def run_all(cfg: dict, force: bool = False, yes: bool = False, log=print) -> int
         t1 = time.monotonic()
         res = run(f, cfg, force=force, quiet=True, wait=True)
         done_n += 1
-        log(f"  {'ok' if res else 'no subject (skipped)'}  {_fmt_secs(time.monotonic() - t1)}")
-    log(f"done: {len(todo)} image(s) in {_fmt_secs(time.monotonic() - t0)}")
-    return 0
+        if res:
+            verdict = "ok"
+        elif last_error:
+            verdict = f"FAILED: {last_error}"
+            failures += 1
+        else:
+            verdict = "nothing in front (skipped)"
+        log(f"  {verdict}  {_fmt_secs(time.monotonic() - t1)}")
+        if failures >= 3 and done_n == failures:
+            log("! every image fails — the venv is probably missing something. Run "
+                "`wallflow depth setup` again, then `wallflow depth --file <img> -v` for the full error.")
+            return 1
+    log(f"done: {len(todo)} image(s) in {_fmt_secs(time.monotonic() - t0)}"
+        + (f", {failures} failed" if failures else ""))
+    return 1 if failures else 0
 
 
 def status_text(cfg: dict) -> str:
