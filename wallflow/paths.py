@@ -29,6 +29,7 @@ WIDGET_DIR = CONFIG_DIR / "widgets"            # installed widget addons (<name>
 CUTOUT_DIR = CACHE_DIR / "cutouts"             # subject cutouts, <hash>.png
 OVERLAY_STATE = CACHE_DIR / "overlay.json"     # what the overlay draws; watched by the QML
 OVERLAY_PID = CACHE_DIR / "overlay.pid"
+OVERLAY_EDIT = CACHE_DIR / "overlay.edit"      # exists = edit mode (widgets draggable)
 DEPTH_VENV = DATA_HOME / "wallflow-depth"      # rembg + onnxruntime live here, not in DEST
 
 MPV_SOCKET = RUNTIME_DIR / "wallflow-mpv.sock"   # mpv IPC (hot-swap / pause)

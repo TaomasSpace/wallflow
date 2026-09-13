@@ -83,7 +83,9 @@ ShellRoot {
             WlrLayershell.namespace: "wallflow-overlay"
             WlrLayershell.keyboardFocus: root.editing ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
             anchors { top: true; bottom: true; left: true; right: true }
-            exclusiveZone: 0
+            // ignore every other layer's reserved space (bars!) — the crop must be computed
+            // on the full output, exactly like the wallpaper backend does, or the cutout shifts
+            exclusionMode: ExclusionMode.Ignore
             color: root.editing ? "#20000000" : "transparent"
             mask: root.editing ? null : emptyRegion    // empty region = every click passes through
 

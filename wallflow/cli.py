@@ -10,6 +10,7 @@
   wallflow depth setup [--gpu] install the segmentation venv (rembg) for subject cutouts
   wallflow depth               pre-segment every image wallpaper
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
+  wallflow overlay edit|done   drag widgets around with the mouse / stop
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
   wallflow theme               re-run wallust + addon reloads
   wallflow theme list          show wallust palettes (current marked)
@@ -108,7 +109,7 @@ def _cmd_transcode(a, cfg):
 
 def _cmd_depth(a, cfg):
     if a.action == "setup":
-        return depth.setup(gpu=a.gpu)
+        return depth.setup(gpu=a.gpu, python=a.python)
     if a.prune:
         print(f"pruned {depth.prune(cfg)} stale file(s)")
         return
@@ -120,10 +121,17 @@ def _cmd_depth(a, cfg):
         print(out or "no subject found / not set up")
         return
     depth.run_all(cfg, force=a.force)
+    overlay.write_state(cfg)              # the current wallpaper's cutout may just have appeared
 
 
 def _cmd_overlay(a, cfg):
-    if a.action == "start":
+    if a.action == "edit":
+        on = overlay.edit(cfg)
+        print("edit mode on — drag widgets; Esc or `wallflow overlay done` to finish" if on else "edit mode off")
+    elif a.action == "done":
+        overlay.edit(cfg, on=False)
+        print("edit mode off")
+    elif a.action == "start":
         print("overlay running" if overlay.start(cfg) else "overlay not started")
     elif a.action == "stop":
         print("stopped" if overlay.stop() else "not running")
@@ -188,12 +196,19 @@ def _cmd_config(a, cfg):
     elif a.action == "get":
         print(config.get(cfg, a.key))
     elif a.action == "set":
-        config.save(config.set_value(cfg, a.key, a.value))
-        print(f"{a.key} = {config.get(config.load(), a.key)}")
-        if a.key.startswith("hypr."):
+        pairs = [a.key, a.value, *(a.more or [])]
+        if len(pairs) % 2:
+            sys.exit("config set takes key/value pairs")
+        keys = pairs[::2]
+        for k, v in zip(keys, pairs[1::2]):
+            config.set_value(cfg, k, v)
+        config.save(cfg)
+        for k in keys:
+            print(f"{k} = {config.get(cfg, k)}")
+        if any(k.startswith("hypr.") for k in keys):
             from . import hypr
             hypr.install(config.load()); hypr.reload()
-        elif a.key.startswith(("overlay.", "depth.")):
+        if any(k.startswith(("overlay.", "depth.")) for k in keys):
             overlay.ensure(config.load())      # live: the overlay watches its state file
     elif a.action == "edit":
         if not paths.CONFIG_FILE.exists():
@@ -267,6 +282,7 @@ def build_parser():
     x = sp.add_parser("depth", help="subject cutouts for the overlay (rembg in its own venv)")
     x.add_argument("action", nargs="?", choices=["setup"])
     x.add_argument("--gpu", action="store_true", help="setup: onnxruntime-gpu (needs CUDA/cuDNN)")
+    x.add_argument("--python", default="", help="setup: interpreter for the venv, e.g. python3.12")
     x.add_argument("--file", help="one image instead of the whole folder")
     x.add_argument("--swap", action="store_true", help="hand the cutout to the overlay when done (internal)")
     x.add_argument("--force", action="store_true")
@@ -275,7 +291,8 @@ def build_parser():
     x.set_defaults(fn=_cmd_depth)
 
     x = sp.add_parser("overlay", help="widget + subject layer between wallpaper and windows")
-    x.add_argument("action", nargs="?", default="status", choices=["start", "stop", "restart", "status"])
+    x.add_argument("action", nargs="?", default="status",
+                   choices=["start", "stop", "restart", "status", "edit", "done"])
     x.set_defaults(fn=_cmd_overlay)
 
     x = sp.add_parser("rename", help="rename wallpapers per [rename].mode (0 off / 1 prefix / 2 full)")
@@ -292,6 +309,7 @@ def build_parser():
     x = sp.add_parser("config")
     x.add_argument("action", nargs="?", default="show", choices=["show", "get", "set", "edit", "path"])
     x.add_argument("key", nargs="?"); x.add_argument("value", nargs="?")
+    x.add_argument("more", nargs="*", help="further key value pairs (set)")
     x.set_defaults(fn=_cmd_config)
 
     x = sp.add_parser("setup")

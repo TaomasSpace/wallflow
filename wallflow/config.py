@@ -110,6 +110,7 @@ DEFAULTS: dict = {
     "hypr": {
         "bind": "SUPER + W",          # Lua form; .conf gets "SUPER, W"
         "bind_all": "",                # "show hidden" bind; "" = bind's mods + SHIFT
+        "bind_edit": "",               # toggle overlay edit mode (drag widgets); "" = no bind
         "config_file": "",            # auto: hyprland.lua > hyprland.conf
         "manage": True,               # write autostart/bind block into the config
     },

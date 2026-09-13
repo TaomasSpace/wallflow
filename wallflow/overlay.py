@@ -7,6 +7,12 @@ subject cutout (depth.py). Rendered by quickshell (`qs -p templates/overlay.qml`
 State flows one way: Python writes ~/.cache/wallflow/overlay.json (cutout path,
 widget list, the [overlay] config section); the QML watches that file and
 hot-reloads. No IPC, no restarts on wallpaper change.
+
+Edit mode (`wallflow overlay edit`): the window jumps to the `top` layer and
+accepts input, widgets become draggable; on drop the QML runs
+`wallflow config set overlay.<k> <v> …` (exe path comes from the state file),
+which rewrites the state and everything settles. `wallflow overlay done` / Esc
+ends it.
 """
 import json
 import os
@@ -37,6 +43,8 @@ def write_state(cfg: dict | None = None, current: str | None = None) -> dict:
     cfg = cfg or config.load()
     cur = current or backend.read_current()
     state = {
+        "exe": [sys.executable, str(paths.REPO_DIR / "wallflow.py")],
+        "edit": paths.OVERLAY_EDIT.exists(),
         "wallpaper": cur,
         "cutout": depth.existing(cur, cfg) if cur and os.path.exists(cur) else None,
         "widgets": widgets(),
@@ -109,6 +117,18 @@ def stop() -> bool:
     return was
 
 
+def edit(cfg: dict, on: bool | None = None) -> bool:
+    """Toggle (or set) edit mode. Returns the new state."""
+    cur = paths.OVERLAY_EDIT.exists()
+    new = (not cur) if on is None else on
+    if new:
+        paths.OVERLAY_EDIT.touch()
+    else:
+        paths.OVERLAY_EDIT.unlink(missing_ok=True)
+    start(cfg, log=lambda *_: None)
+    return new
+
+
 def restart(cfg: dict | None = None, log=print) -> bool:
     stop()
     return start(cfg, log)
@@ -129,7 +149,7 @@ def status_text(cfg: dict) -> str:
     st = write_state(cfg)
     return "\n".join([
         f"enabled  : {cfg['overlay']['enabled']}",
-        f"running  : {running()} (pid {_pid() or '-'})",
+        f"running  : {running()} (pid {_pid() or '-'}){' — EDIT MODE' if st['edit'] else ''}",
         f"quickshell: {qs_bin() or 'not found'}",
         f"depth    : {'ready' if depth.ready() else 'not set up (wallflow depth setup)'}",
         f"cutout   : {st['cutout'] or '-'}",

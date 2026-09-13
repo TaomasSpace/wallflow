@@ -54,12 +54,19 @@ def ready() -> bool:
     return venv_python().exists()
 
 
-def setup(gpu: bool = False, log=print) -> int:
-    """Create the venv and pip-install rembg (+ onnxruntime). Idempotent."""
+def setup(gpu: bool = False, python: str = "", log=print) -> int:
+    """Create the venv and pip-install rembg (+ onnxruntime). Idempotent.
+
+    `python` = interpreter for the venv. onnxruntime wheels usually trail the newest
+    CPython by a few months — if pip finds none for the system python, pass an older
+    one (`--python python3.12`)."""
     vp = venv_python()
+    if python and vp.exists():
+        import shutil
+        shutil.rmtree(paths.DEPTH_VENV, ignore_errors=True)   # rebuild with the requested interpreter
     if not vp.exists():
-        log(f"creating venv {paths.DEPTH_VENV}")
-        r = subprocess.run([sys.executable, "-m", "venv", str(paths.DEPTH_VENV)])
+        log(f"creating venv {paths.DEPTH_VENV} ({python or sys.executable})")
+        r = subprocess.run([python or sys.executable, "-m", "venv", str(paths.DEPTH_VENV)])
         if r.returncode != 0:
             log("could not create the venv (python3-venv missing?)")
             return 1
@@ -68,8 +75,8 @@ def setup(gpu: bool = False, log=print) -> int:
     r = subprocess.run([str(vp), "-m", "pip", "install", "--upgrade", "--quiet",
                         f"rembg[{extra}]", "pillow"])
     if r.returncode != 0:
-        log("pip failed — if it's a python-version wheel problem, try a slightly older "
-            "python for the venv: rm -rf " + str(paths.DEPTH_VENV) + " && python3.12 -m venv " + str(paths.DEPTH_VENV))
+        log("pip failed — if no onnxruntime wheel exists for this python yet, use an older one:\n"
+            "    wallflow depth setup --python python3.12   (Arch: pacman -S python312, or `uv python install 3.12`)")
         return 1
     if gpu:
         log("note: onnxruntime-gpu needs CUDA + cuDNN libraries on the system; if cutouts fail, "

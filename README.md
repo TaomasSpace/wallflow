@@ -33,7 +33,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow addons list` | show addons; `install <name>` / `remove <name>` / `info <name>` |
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
 | `wallflow depth setup` | once: install the segmentation venv, so widgets can sit *behind* the wallpaper's subject |
-| `wallflow overlay` | `start` / `stop` / `restart` / `status` of the widget + subject layer |
+| `wallflow overlay` | `start` / `stop` / `restart` / `status` of the widget + subject layer; `edit` = drag widgets |
 | `wallflow rename [--dry-run]` | rename wallpapers per `rename.mode` (0 off / 1 prefix / 2 full) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
 | `wallflow setup --redetect` | re-run detection (new GPU, new monitor, switched backend) |
@@ -117,6 +117,9 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   widgets simply sit on top. `wallflow depth` pre-segments the whole folder, `--prune` cleans up,
   `depth.prewarm = true` lets `wallflow watch` do it ahead of time.
 - **Videos / GIFs** get no cutout in v1 (that would need a per-frame matte) — widgets sit on top.
+- **Moving widgets**: `wallflow overlay edit` (or a bind: `hypr.bind_edit = "SUPER + SHIFT + W"`)
+  lifts the overlay above your windows and makes widgets draggable; drop writes the position to
+  config.toml. `Esc` or `wallflow overlay done` ends it.
 - **Clock**: `overlay.clock_x` / `clock_y` (fractions of the screen), `clock_size` (px),
   `clock_format` / `clock_date_format` (Qt formats, `""` hides the date), `clock_font`, `clock_weight`,
   `clock_color`, `clock_opacity`, `clock_shadow`. `overlay.outputs = "DP-1"` limits it to one monitor.
@@ -183,7 +186,7 @@ When `rename.mode != 0`, two things happen automatically:
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
-[hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), config_file (auto), manage = true
+[hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), bind_edit (overlay edit mode), config_file (auto), manage = true
 ```
 
 Everything the installer detected is just a default here — edit and rerun `wallflow setup` (it keeps

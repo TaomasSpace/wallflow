@@ -43,6 +43,7 @@ def render(flavor: str, cfg: dict) -> str:
     pauser = cfg["video"]["pause_on_fullscreen"]
     watch = cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"]
     overlay = cfg["overlay"]["enabled"]
+    edit = _bind_parts(cfg["hypr"]["bind_edit"]) if cfg["hypr"].get("bind_edit") else None
     if flavor == "lua":
         lines = [
             f"-- {BEGIN}",
@@ -59,6 +60,10 @@ def render(flavor: str, cfg: dict) -> str:
             "end)",
             f'hl.bind("{mods.replace(" ", " + ")} + {key}", hl.dsp.exec_cmd("{exe} ui"))',
             f'hl.bind("{mods_all.replace(" ", " + ")} + {key_all}", hl.dsp.exec_cmd("{exe} ui --all"))',
+        ]
+        if edit:
+            lines.append(f'hl.bind("{edit[0].replace(" ", " + ")} + {edit[1]}", hl.dsp.exec_cmd("{exe} overlay edit"))')
+        lines += [
             'hl.layer_rule({ match = { namespace = "mpvpaper" }, name = "wallflow-mpvpaper-noanim", no_anim = true })',
             'hl.layer_rule({ match = { namespace = "wallflow-overlay" }, name = "wallflow-overlay-noanim", no_anim = true })',
             f"-- {END}",
@@ -77,6 +82,10 @@ def render(flavor: str, cfg: dict) -> str:
         lines += [
             f"bind = {mods}, {key}, exec, {exe} ui",
             f"bind = {mods_all}, {key_all}, exec, {exe} ui --all",
+        ]
+        if edit:
+            lines.append(f"bind = {edit[0]}, {edit[1]}, exec, {exe} overlay edit")
+        lines += [
             "layerrule = noanim, mpvpaper",
             "layerrule = noanim, wallflow-overlay",
             f"# {END}",
