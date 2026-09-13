@@ -17,6 +17,7 @@ CONFIG_DIR = CONFIG_HOME / "wallflow"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 ADDON_STATE_DIR = CONFIG_DIR / "addons"          # one <name>.json per installed addon
 DEPTH_OFF_FILE = CONFIG_DIR / "depth-off.json"   # wallpapers with the 3D cutout switched off
+DEPTH_TUNE_FILE = CONFIG_DIR / "depth-tune.json" # per-wallpaper overrides of [depth] (near, mode, …)
 
 CACHE_DIR = CACHE_HOME / "wallflow"
 STATE_FILE = CACHE_DIR / "current"               # path of the last applied wallpaper

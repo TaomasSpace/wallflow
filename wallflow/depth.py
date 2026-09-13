@@ -95,12 +95,32 @@ def subject_alpha():
                alpha_matting=(am == "1"), only_mask=True)
     return np.asarray(Image.open(BytesIO(m)).convert("L"), np.float32) / 255.0
 
+preview = mode.startswith("preview:")
+if preview:
+    mode = mode.split(":", 1)[1]
 if mode == "subject":
     alpha = subject_alpha()
 elif mode == "both":
     alpha = np.maximum(depth_alpha(), subject_alpha())
 else:
     alpha = depth_alpha()
+
+if preview:
+    # left: the depth map (bright = near) with the current threshold as a red band;
+    # right: what would be cut out, over a green backdrop
+    sc = 1280.0 / W
+    pw, ph = int(W * sc), int(H * sc)
+    d = np.load(dmap).astype(np.float32) if os.path.exists(dmap) else np.zeros((H, W), np.float32)
+    dm = np.asarray(Image.fromarray((d * 255).astype(np.uint8)).resize((pw, ph)), np.uint8)
+    left = np.dstack([dm, dm, dm]).astype(np.float32)
+    band = (np.abs(np.asarray(Image.fromarray(d, "F").resize((pw, ph)), np.float32) - (1.0 - near)) < 0.01)
+    left[band] = [255, 40, 40]
+    small = np.asarray(img.resize((pw, ph)), np.float32)
+    a = np.asarray(Image.fromarray(alpha, "F").resize((pw, ph)), np.float32)[..., None]
+    right = small * a + np.array([40, 200, 60], np.float32) * (1 - a)
+    both = np.concatenate([left, right], 1).astype(np.uint8)
+    Image.fromarray(both).save(dst, "PNG")
+    sys.exit(0)
 
 if (alpha > 0.06).sum() < 0.005 * W * H:      # < 0.5 %: nothing worth occluding with
     sys.exit(3)
@@ -174,6 +194,43 @@ def enabled_for(src: str) -> bool:
     return os.path.abspath(src) not in disabled()
 
 
+# --- per-image tuning ---------------------------------------------------------
+# One threshold can't fit every picture: a floor-level shot's "nearest 30 %" is the
+# floor, a portrait's is the nose. `wallflow depth tune near=0.5 mode=both [file]`
+# overrides any [depth] key for that image only.
+
+TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model")
+
+
+def tunes() -> dict[str, dict]:
+    try:
+        return json.loads(paths.DEPTH_TUNE_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def set_tune(src: str, values: dict | None) -> dict:
+    """values=None clears the override. Returns the image's effective override."""
+    src = os.path.abspath(src)
+    t = tunes()
+    if values is None:
+        t.pop(src, None)
+    else:
+        cur = t.get(src, {})
+        cur.update(values)
+        t[src] = cur
+    paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    paths.DEPTH_TUNE_FILE.write_text(json.dumps(t, indent=2))
+    return t.get(src, {})
+
+
+def settings(src: str, cfg: dict) -> dict:
+    """[depth] with this image's overrides applied."""
+    d = dict(cfg["depth"])
+    d.update(tunes().get(os.path.abspath(src), {}))
+    return d
+
+
 def notify(title: str, body: str = "", urgency: str = "low") -> None:
     if shutil.which("notify-send"):
         subprocess.run(["notify-send", "-a", "wallflow", "-u", urgency, title, body],
@@ -184,7 +241,7 @@ def notify(title: str, body: str = "", urgency: str = "low") -> None:
 
 def target(src: str, cfg: dict) -> Path:
     st = os.stat(src)
-    d = cfg["depth"]
+    d = settings(src, cfg)
     key = f"{src}:{st.st_mtime_ns}:{d['mode']}"
     if d["mode"] in ("subject", "both"):
         key += f":{d['model']}:{int(bool(d['alpha_matting']))}"
@@ -197,7 +254,7 @@ def depthmap_path(src: str, cfg: dict) -> Path:
     """The raw depth map is cached on its own: retuning depth.near/feather then
     only redoes the (fast) thresholding, not the model."""
     st = os.stat(src)
-    key = f"{src}:{st.st_mtime_ns}:{cfg['depth']['depth_model']}"
+    key = f"{src}:{st.st_mtime_ns}:{settings(src, cfg)['depth_model']}"
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".depth.npy")
 
 
@@ -253,10 +310,7 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
         if skip.exists() and not force:
             return None
         tmp = dst.with_suffix(".part.png")
-        d = cfg["depth"]
-        cmd = [str(venv_python()), "-c", _WORKER, src, str(tmp), d["mode"],
-               str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
-               "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg))]
+        cmd = _worker_cmd(src, str(tmp), cfg)
         global last_error
         last_error = ""
         r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
@@ -287,6 +341,35 @@ def pending(cfg: dict, force: bool = False) -> list[str]:
 def _fmt_secs(s: float) -> str:
     s = int(round(s))
     return f"{s // 60}m {s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def _worker_cmd(src: str, dst: str, cfg: dict, preview: bool = False) -> list[str]:
+    d = settings(src, cfg)
+    return [str(venv_python()), "-c", _WORKER, src, dst,
+            ("preview:" if preview else "") + d["mode"],
+            str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
+            "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg))]
+
+
+def preview(src: str, cfg: dict, log=print) -> Path | None:
+    """Render depth map + resulting cutout side by side and open it."""
+    if not ready():
+        log("depth is not set up — run `wallflow depth setup`")
+        return None
+    paths.CUTOUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = paths.CACHE_DIR / "depth-preview.png"
+    r = subprocess.run(_worker_cmd(src, str(out), cfg, preview=True),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        log(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"preview failed ({r.returncode})")
+        return None
+    d = settings(src, cfg)
+    log(f"{out}   mode {d['mode']}, near {d['near']}, feather {d['feather']}  "
+        "(left: depth map, bright = near, red = threshold · right: the cutout)")
+    if shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", str(out)], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return out
 
 
 def run_all(cfg: dict, force: bool = False, yes: bool = False, log=print) -> int:
@@ -362,9 +445,12 @@ def status_text(cfg: dict) -> str:
         state = ("video — no cutout" if config.is_video(cfg, cur) else
                  "off for this image" if cur in off else
                  "cutout ready" if existing(cur, cfg) else
-                 "no subject found" if target(cur, cfg).with_suffix(".skip").exists() else "pending")
-        lines.append(f"current  : {os.path.basename(cur)} — {state}")
-    lines.append("           wallflow depth all | on|off [<file>] | --file <f> | --prune")
+                 "nothing in front" if target(cur, cfg).with_suffix(".skip").exists() else "pending")
+        tune = tunes().get(cur)
+        lines.append(f"current  : {os.path.basename(cur)} — {state}"
+                     + (f"  tuned: {' '.join(f'{k}={v}' for k, v in tune.items())}" if tune else ""))
+    lines.append(f"tuned    : {len(tunes())} image(s) with their own settings (depth tune)")
+    lines.append("           wallflow depth all | on|off [file] | tune k=v … [file] | map [file] | --prune")
     return "\n".join(lines)
 
 

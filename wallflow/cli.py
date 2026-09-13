@@ -11,6 +11,8 @@
   wallflow depth setup [--gpu] install the segmentation venv (rembg) for subject cutouts
   wallflow depth all [-y]      segment every image wallpaper now (slow — it warns and shows ETA)
   wallflow depth on|off [file] switch the cutout on/off per image (default: current wallpaper)
+  wallflow depth tune near=0.5 mode=both [file]   per-image settings (`tune reset` clears)
+  wallflow depth map [file]    show the depth map + resulting cutout side by side
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
@@ -114,6 +116,37 @@ def _cmd_depth(a, cfg):
         return depth.setup(gpu=a.gpu, python=a.python)
     if a.prune:
         print(f"pruned {depth.prune(cfg)} stale file(s)")
+        return
+    if a.action in ("tune", "map"):
+        toks = [t for t in [a.name, *(a.extra or [])] if t]
+        kv = [t for t in toks if "=" in t]
+        files = [t for t in toks if "=" not in t and t != "reset"]
+        src = os.path.abspath(os.path.expanduser(files[0])) if files else backend.read_current()
+        if not src:
+            sys.exit("no wallpaper set and no file given")
+        if a.action == "map":
+            return 0 if depth.preview(src, cfg) else 1
+        if "reset" in toks:
+            depth.set_tune(src, None)
+            print(f"tune cleared for {os.path.basename(src)}")
+        else:
+            vals = {}
+            for t in kv:
+                k, _, v = t.partition("=")
+                if k not in depth.TUNABLE:
+                    sys.exit(f"unknown key {k!r} — tunable: {', '.join(depth.TUNABLE)}")
+                vals[k] = config.parse_value(v)
+            if not vals:
+                sys.exit("nothing to set — e.g. wallflow depth tune near=0.5 mode=both")
+            eff = depth.set_tune(src, vals)
+            print(f"{os.path.basename(src)}: " + " ".join(f"{k}={v}" for k, v in eff.items()))
+        if depth.wanted(src, cfg):
+            if src == backend.read_current():
+                backend._spawn_background_cutout(src)
+                print("  recomputing in the background")
+            else:
+                print("  cutout will be recomputed on next use (or `wallflow depth --file`)")
+        overlay.ensure(cfg)
         return
     if a.action in ("on", "off"):
         src = os.path.abspath(os.path.expanduser(a.name)) if a.name else backend.read_current()
@@ -316,8 +349,9 @@ def build_parser():
     x.set_defaults(fn=_cmd_transcode)
 
     x = sp.add_parser("depth", help="3D subject cutouts for the overlay (rembg in its own venv)")
-    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off"])
-    x.add_argument("name", nargs="?", help="on/off: image file (default: current wallpaper)")
+    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off", "tune", "map"])
+    x.add_argument("name", nargs="?", help="on/off/tune/map: image file (default: current wallpaper)")
+    x.add_argument("extra", nargs="*", help="tune: key=value … / reset")
     x.add_argument("--yes", "-y", action="store_true", help="all: skip the 'this takes long' prompt")
     x.add_argument("--gpu", action="store_true", help="setup: onnxruntime-gpu (needs CUDA/cuDNN)")
     x.add_argument("--python", default="", help="setup: interpreter for the venv, e.g. python3.12")

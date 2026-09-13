@@ -122,6 +122,11 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
     (`depth.model`: `isnet-anime`, or `birefnet-general` + `depth.alpha_matting = true` for the
     cleanest edges on photo-like renders).
   - `both` — union of the two.
+  - **Per image**: one threshold can't fit every picture (a floor-level shot's nearest 30 % is the
+    floor; a portrait's is the nose). `wallflow depth map` opens the depth map next to the resulting
+    cutout so you can see what you're thresholding; `wallflow depth tune near=0.5 mode=both` (current
+    wallpaper, or a file) overrides any `[depth]` key for that image only and recomputes it;
+    `depth tune reset` clears it.
 - Everything runs in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
   dependency-light. Made lazily in the background the first time an image is applied (you get a
   notification while it runs, `depth.notify`), cached by path+mtime+settings like transcodes, and fade
