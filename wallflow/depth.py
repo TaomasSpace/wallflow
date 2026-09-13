@@ -55,7 +55,7 @@ def guided(alpha, guide, r, eps):
     cov = box(guide * alpha, r) - mI * mp
     var = box(guide * guide, r) - mI * mI
     a = cov / (var + eps); b = mp - a * mI
-    return np.clip(box(a, r) * guide + box(b, r), 0, 1)
+    return np.clip(box(a, r) * guide + box(b, r), 0, 1).astype(np.float32)
 
 def otsu(d):
     # threshold that best splits the depth histogram into two groups; also returns
@@ -168,12 +168,12 @@ if preview:
     dm = np.asarray(Image.fromarray((d * 255).astype(np.uint8)).resize((pw, ph)), np.uint8)
     left = np.dstack([dm, dm, dm]).astype(np.float32)
     if threshold is not None:
-        band = (np.abs(np.asarray(Image.fromarray(d, "F").resize((pw, ph)), np.float32) - threshold) < 0.01)
+        band = (np.abs(np.asarray(Image.fromarray(np.ascontiguousarray(d, np.float32), "F").resize((pw, ph)), np.float32) - threshold) < 0.01)
         left[band] = [255, 40, 40]
     print(f"threshold {threshold if threshold is None else round(threshold, 3)}  "
           f"separation {separation:.2f}  {decision}")
     small = np.asarray(img.resize((pw, ph)), np.float32)
-    a = np.asarray(Image.fromarray(alpha, "F").resize((pw, ph)), np.float32)[..., None]
+    a = np.asarray(Image.fromarray(np.ascontiguousarray(alpha, np.float32), "F").resize((pw, ph)), np.float32)[..., None]
     right = small * a + np.array([40, 200, 60], np.float32) * (1 - a)
     both = np.nan_to_num(np.concatenate([left, right], 1)).clip(0, 255).astype(np.uint8)
     Image.fromarray(both).save(dst, "PNG")
