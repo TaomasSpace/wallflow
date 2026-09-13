@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-from . import addons, config, paths, thumbs, transcode
+from . import addons, config, depth, paths, thumbs, transcode
 
 _QUIET = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -258,6 +258,12 @@ def _spawn_background_transcode(path: str) -> None:
                      start_new_session=True, **_QUIET)
 
 
+def _spawn_background_cutout(path: str) -> None:
+    exe = [sys.executable, str(paths.REPO_DIR / "wallflow.py")]
+    subprocess.Popen([*exe, "depth", "--file", path, "--swap"],
+                     start_new_session=True, **_QUIET)
+
+
 def apply(path: str, cfg: dict | None = None, do_theme: bool = True) -> None:
     cfg = cfg or config.load()
     if path.startswith("file://"):
@@ -290,7 +296,11 @@ def apply(path: str, cfg: dict | None = None, do_theme: bool = True) -> None:
         set_image(path, cfg)
         if do_theme:
             theme(path, cfg)
+        if depth.wanted(path, cfg):
+            _spawn_background_cutout(path)   # overlay swaps the cutout in when it's done
     _save_state(path)
+    from . import overlay
+    overlay.ensure(cfg)                      # widgets show now; cutout (if cached) too
 
 
 _BACKEND_LAYERS = {"caelestia": "caelestia-background", "swww": "swww-daemon", "hyprpaper": "hyprpaper"}
@@ -327,9 +337,11 @@ def restore(cfg: dict | None = None) -> None:
     path = read_current()
     if not path or not os.path.exists(path):
         return
+    from . import overlay
     if config.is_video(cfg, path):
         src = transcode.existing(path, cfg) or path
         if mpvpaper_running() and mpv_command("loadfile", src):
+            overlay.ensure(cfg)
             return                                   # already up — just make sure it's this file
         _wait_for_desktop(cfg)                       # login: don't get buried under the bg layer
         launch_mpvpaper(src, cfg)
@@ -337,6 +349,7 @@ def restore(cfg: dict | None = None) -> None:
         kill_mpvpaper()                              # a video layer must never outlive an image
         if cfg["image"]["backend"] != "caelestia":   # caelestia restores its own
             set_image(path, cfg)
+    overlay.ensure(cfg)
 
 
 def reattach(cfg: dict | None = None) -> None:
@@ -352,6 +365,13 @@ def swap_if_current(original: str, transcoded: str) -> None:
     """Called by the background transcode: hot-swap only if still the active wallpaper."""
     if read_current() == original:
         mpv_command("loadfile", transcoded)
+
+
+def cutout_ready(original: str, cfg: dict) -> None:
+    """Called by the background cutout: the overlay picks it up if still current."""
+    if read_current() == original:
+        from . import overlay
+        overlay.write_state(cfg, original)
 
 
 def step(cfg: dict, delta: int = 1) -> str | None:

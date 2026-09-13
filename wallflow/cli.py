@@ -7,6 +7,9 @@
   wallflow restore             re-apply last wallpaper (autostart)
   wallflow pauser              fullscreen watcher (autostart)
   wallflow transcode           pre-transcode every video wallpaper
+  wallflow depth setup [--gpu] install the segmentation venv (rembg) for subject cutouts
+  wallflow depth               pre-segment every image wallpaper
+  wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
   wallflow theme               re-run wallust + addon reloads
   wallflow theme list          show wallust palettes (current marked)
@@ -23,7 +26,7 @@ import os
 import subprocess
 import sys
 
-from . import __version__, addons, backend, config, paths, rename, transcode
+from . import __version__, addons, backend, config, depth, overlay, paths, rename, transcode
 
 
 def _cmd_ui(a, cfg):
@@ -103,6 +106,33 @@ def _cmd_transcode(a, cfg):
     transcode.run_all(cfg, force=a.force)
 
 
+def _cmd_depth(a, cfg):
+    if a.action == "setup":
+        return depth.setup(gpu=a.gpu)
+    if a.prune:
+        print(f"pruned {depth.prune(cfg)} stale file(s)")
+        return
+    if a.file:
+        src = os.path.abspath(os.path.expanduser(a.file))
+        out = depth.run(src, cfg, force=a.force, quiet=not a.verbose)
+        if out and a.swap:
+            backend.cutout_ready(src, cfg)
+        print(out or "no subject found / not set up")
+        return
+    depth.run_all(cfg, force=a.force)
+
+
+def _cmd_overlay(a, cfg):
+    if a.action == "start":
+        print("overlay running" if overlay.start(cfg) else "overlay not started")
+    elif a.action == "stop":
+        print("stopped" if overlay.stop() else "not running")
+    elif a.action == "restart":
+        print("overlay running" if overlay.restart(cfg) else "overlay not started")
+    else:
+        print(overlay.status_text(cfg))
+
+
 def _cmd_watch(a, cfg):
     from . import watcher
     watcher.main()
@@ -127,15 +157,22 @@ def _cmd_addons(a, cfg):
     elif a.action == "info":
         print(addons.info_text(a.name))
     elif a.action == "install":
+        av = addons.available()
         for n in a.name.split(","):
-            if addons.install(n.strip()) and backend.read_current():
+            n = n.strip()
+            if not addons.install(n):
+                continue
+            if av[n].get("template") and backend.read_current():
                 _cmd_theme(a, cfg)        # render colours right away
+            if av[n].get("widget"):
+                overlay.start(cfg)        # show it right away (also refreshes a running overlay)
     elif a.action == "remove":
         if a.name == "all":
             addons.remove_all(purge=a.purge)
         else:
             for n in a.name.split(","):
                 addons.remove(n.strip(), purge=a.purge)
+        overlay.write_state(cfg)
     elif a.action == "refresh":
         if addons.refresh() and backend.read_current():
             _cmd_theme(a, cfg)
@@ -156,6 +193,8 @@ def _cmd_config(a, cfg):
         if a.key.startswith("hypr."):
             from . import hypr
             hypr.install(config.load()); hypr.reload()
+        elif a.key.startswith(("overlay.", "depth.")):
+            overlay.ensure(config.load())      # live: the overlay watches its state file
     elif a.action == "edit":
         if not paths.CONFIG_FILE.exists():
             config.save(cfg)
@@ -190,6 +229,8 @@ def _cmd_doctor(a, cfg):
     s["encoder"] = cfg["transcode"]["encoder"]
     s["addons_installed"] = sorted(addons.installed())
     s["terminal_ptys"] = sorted(backend.terminal_ptys(cfg))
+    s["depth"] = "ready" if depth.ready() else "not set up (wallflow depth setup)"
+    s["overlay"] = "running" if overlay.running() else "not running"
     print(json.dumps(s, indent=2))
 
 
@@ -222,6 +263,20 @@ def build_parser():
     x.add_argument("--prune", action="store_true", help="delete stale transcodes")
     x.add_argument("-v", "--verbose", action="store_true")
     x.set_defaults(fn=_cmd_transcode)
+
+    x = sp.add_parser("depth", help="subject cutouts for the overlay (rembg in its own venv)")
+    x.add_argument("action", nargs="?", choices=["setup"])
+    x.add_argument("--gpu", action="store_true", help="setup: onnxruntime-gpu (needs CUDA/cuDNN)")
+    x.add_argument("--file", help="one image instead of the whole folder")
+    x.add_argument("--swap", action="store_true", help="hand the cutout to the overlay when done (internal)")
+    x.add_argument("--force", action="store_true")
+    x.add_argument("--prune", action="store_true", help="delete stale cutouts")
+    x.add_argument("-v", "--verbose", action="store_true")
+    x.set_defaults(fn=_cmd_depth)
+
+    x = sp.add_parser("overlay", help="widget + subject layer between wallpaper and windows")
+    x.add_argument("action", nargs="?", default="status", choices=["start", "stop", "restart", "status"])
+    x.set_defaults(fn=_cmd_overlay)
 
     x = sp.add_parser("rename", help="rename wallpapers per [rename].mode (0 off / 1 prefix / 2 full)")
     x.add_argument("--dry-run", action="store_true", help="print planned renames without touching files")

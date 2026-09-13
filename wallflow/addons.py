@@ -14,6 +14,10 @@ Each addon is a folder in addons/ with an addon.toml:
     system_bin  = true                        # also -> /usr/local/bin via sudo, so it shadows
                                               # /usr/bin for processes that don't have ~/.local/bin
                                               # in PATH (Hyprland exec, autostart hooks) (optional)
+    widget      = "clock.qml"                 # overlay widget: QML in the addon folder ->
+                                              # ~/.config/wallflow/widgets, drawn by `wallflow overlay`
+                                              # between wallpaper and subject cutout (optional; an
+                                              # addon can be widget-only, it then needs no wallust)
     [include]                                 # hook the rendered file into the app's config
     file     = "~/.config/kitty/kitty.conf"
     line     = "include wallflow-colors.conf"
@@ -157,8 +161,8 @@ def install(name: str, log=print) -> bool:
     if not a:
         log(f"unknown addon {name!r} — see `wallflow addons list`")
         return False
-    if not shutil.which("wallust"):
-        log("wallust is not installed; addons need it (theme.enabled must be true).")
+    if a.get("template") and not shutil.which("wallust"):
+        log("wallust is not installed; colour addons need it (theme.enabled must be true).")
         return False
     missing = [b for b in a.get("requires", []) if not shutil.which(b)]
     if missing:
@@ -170,6 +174,13 @@ def install(name: str, log=print) -> bool:
     for k in ("backup", "include_file", "include_line", "replaced_line"):
         if k in prev:
             state[k] = prev[k]
+
+    # -1. overlay widget -> ~/.config/wallflow/widgets/<file> (optional)
+    if a.get("widget"):
+        paths.WIDGET_DIR.mkdir(parents=True, exist_ok=True)
+        wdst = paths.WIDGET_DIR / a["widget"]
+        shutil.copyfile(a["_dir"] / a["widget"], wdst)
+        state["widget"] = str(wdst)
 
     # 0. helper script -> ~/.local/bin (optional)
     if a.get("bin"):
@@ -248,6 +259,8 @@ def remove(name: str, log=print, purge: bool = False) -> bool:
         return False
     if state.get("bin"):
         Path(state["bin"]).unlink(missing_ok=True)
+    if state.get("widget"):
+        Path(state["widget"]).unlink(missing_ok=True)
     if state.get("system_bin") and Path(state["system_bin"]).exists():
         subprocess.run(["sudo", "rm", "-f", state["system_bin"]])
     if state.get("template"):
@@ -300,6 +313,8 @@ def info_text(name: str) -> str:
     if a.get("bin"):
         lines.append(f"  bin      : ~/.local/bin/{a['bin']}"
                      + (f", /usr/local/bin/{a['bin']} (sudo)" if a.get("system_bin") else ""))
+    if a.get("widget"):
+        lines.append(f"  widget   : {a['widget']}  ->  ~/.config/wallflow/widgets/ (overlay)")
     if "include" in a:
         lines.append(f"  include  : {a['include']['line']}  ->  {a['include']['file']}")
     if a.get("note"):
