@@ -42,6 +42,7 @@ def render(flavor: str, cfg: dict) -> str:
     mods_all, key_all = _all_bind_parts(cfg)
     pauser = cfg["video"]["pause_on_fullscreen"]
     watch = cfg["rename"]["mode"] != 0 or cfg["general"]["auto_prewarm"]
+    overlay = cfg["overlay"]["enabled"]
     if flavor == "lua":
         lines = [
             f"-- {BEGIN}",
@@ -52,11 +53,14 @@ def render(flavor: str, cfg: dict) -> str:
             lines.append(f'    hl.exec_cmd("{exe} pauser")')
         if watch:
             lines.append(f'    hl.exec_cmd("{exe} watch")')
+        if overlay:
+            lines.append(f'    hl.exec_cmd("{exe} overlay start")')
         lines += [
             "end)",
             f'hl.bind("{mods.replace(" ", " + ")} + {key}", hl.dsp.exec_cmd("{exe} ui"))',
             f'hl.bind("{mods_all.replace(" ", " + ")} + {key_all}", hl.dsp.exec_cmd("{exe} ui --all"))',
             'hl.layer_rule({ match = { namespace = "mpvpaper" }, name = "wallflow-mpvpaper-noanim", no_anim = true })',
+            'hl.layer_rule({ match = { namespace = "wallflow-overlay" }, name = "wallflow-overlay-noanim", no_anim = true })',
             f"-- {END}",
         ]
     else:
@@ -68,10 +72,13 @@ def render(flavor: str, cfg: dict) -> str:
             lines.append(f"exec-once = {exe} pauser")
         if watch:
             lines.append(f"exec-once = {exe} watch")
+        if overlay:
+            lines.append(f"exec-once = {exe} overlay start")
         lines += [
             f"bind = {mods}, {key}, exec, {exe} ui",
             f"bind = {mods_all}, {key_all}, exec, {exe} ui --all",
             "layerrule = noanim, mpvpaper",
+            "layerrule = noanim, wallflow-overlay",
             f"# {END}",
         ]
     return "\n".join(lines) + "\n"

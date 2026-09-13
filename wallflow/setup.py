@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import config, detect, hypr, paths, rename as rename_mod, transcode
+from . import config, depth, detect, hypr, overlay, paths, rename as rename_mod, transcode
 
 
 def _log(msg: str) -> None:
@@ -58,6 +58,8 @@ def run(args) -> int:
             cfg["transcode"]["enabled"] = False
     _log(f"gpu / encoder: {detect.gpu_vendor()} / {cfg['transcode']['encoder']}"
          f"  (max {cfg['transcode']['max_width']}px, {cfg['transcode']['fps']} fps)")
+    _log(f"overlay      : {'quickshell found' if overlay.qs_bin() else 'off (quickshell not found)'}"
+         f", depth {'ready' if depth.ready() else 'not set up — `wallflow depth setup` (optional)'}")
 
     config.save(cfg)
     _log(f"config       : {paths.CONFIG_FILE}")
@@ -97,6 +99,10 @@ def run(args) -> int:
         subprocess.Popen([paths.launcher_cmd(), "watch"], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    # --- overlay: start now if there is something to draw (autostart covers next login)
+    if cfg["overlay"]["enabled"] and detect.hyprland_running():
+        overlay.start(cfg, log=lambda *_: None)
+
     missing = [t for t in ("mpvpaper", "ffmpeg") if not detect.which(t)]
     if missing:
         print(f"  ! missing: {', '.join(missing)} — video wallpapers need them")
@@ -111,3 +117,4 @@ def remove() -> None:
         print("  removed wallflow block from Hyprland config")
         hypr.reload()
     subprocess.run(["pkill", "-f", "wallflow.py watch"], check=False)
+    overlay.stop()

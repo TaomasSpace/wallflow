@@ -20,7 +20,7 @@ import sys
 import threading
 import time
 
-from . import backend, config, paths, rename, thumbs, transcode
+from . import backend, config, depth, paths, rename, thumbs, transcode
 
 _libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
 
@@ -106,6 +106,10 @@ def _prewarm(cfg: dict) -> None:
     for f in files:
         if config.is_video(cfg, f) and transcode.wanted(f, cfg):
             transcode.run(f, cfg)
+    if cfg["depth"]["prewarm"]:                  # off by default: CPU segmentation of a whole folder
+        for f in files:
+            if depth.wanted(f, cfg):
+                depth.run(f, cfg)
 
 
 def _trigger() -> None:

@@ -160,7 +160,7 @@ def summary() -> dict:
         "monitors": [f"{m['name']} {m['width']}x{m['height']}@{round(m.get('refreshRate', 0))}" for m in ms],
         "image_backend": image_backend(),
         "gpu": gpu_vendor(),
-        "tools": {t: which(t) for t in ("mpvpaper", "ffmpeg", "ffprobe", "wallust", "caelestia", "hyprctl", "jq")},
+        "tools": {t: which(t) for t in ("mpvpaper", "ffmpeg", "ffprobe", "wallust", "caelestia", "hyprctl", "jq", "qs")},
         "pyside6": _has_pyside(),
     }
 

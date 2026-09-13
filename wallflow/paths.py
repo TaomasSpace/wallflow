@@ -24,12 +24,20 @@ TRANSCODE_DIR = CACHE_DIR / "transcoded"
 PAUSER_LOCK = CACHE_DIR / "pauser.lock"
 WATCHER_LOCK = CACHE_DIR / "watcher.lock"
 
+# depth overlay (see overlay.py / depth.py)
+WIDGET_DIR = CONFIG_DIR / "widgets"            # installed widget addons (<name>.qml)
+CUTOUT_DIR = CACHE_DIR / "cutouts"             # subject cutouts, <hash>.png
+OVERLAY_STATE = CACHE_DIR / "overlay.json"     # what the overlay draws; watched by the QML
+OVERLAY_PID = CACHE_DIR / "overlay.pid"
+DEPTH_VENV = DATA_HOME / "wallflow-depth"      # rembg + onnxruntime live here, not in DEST
+
 MPV_SOCKET = RUNTIME_DIR / "wallflow-mpv.sock"   # mpv IPC (hot-swap / pause)
 
 # --- where the code lives --------------------------------------------------
 PKG_DIR = Path(__file__).resolve().parent
 REPO_DIR = PKG_DIR.parent
 ADDONS_DIR = REPO_DIR / "addons"
+OVERLAY_QML = PKG_DIR / "templates" / "overlay.qml"
 INSTALL_DIR = DATA_HOME / "wallflow"
 LAUNCHER = HOME / ".local" / "bin" / "wallflow"
 
@@ -46,5 +54,5 @@ def launcher_cmd() -> str:
 
 
 def ensure_dirs() -> None:
-    for d in (CONFIG_DIR, ADDON_STATE_DIR, CACHE_DIR, THUMB_DIR, TRANSCODE_DIR):
+    for d in (CONFIG_DIR, ADDON_STATE_DIR, WIDGET_DIR, CACHE_DIR, THUMB_DIR, TRANSCODE_DIR, CUTOUT_DIR):
         d.mkdir(parents=True, exist_ok=True)

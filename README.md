@@ -32,6 +32,8 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow theme list` | show wallust palettes; `set <name>` switches (saved + applied) |
 | `wallflow addons list` | show addons; `install <name>` / `remove <name>` / `info <name>` |
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
+| `wallflow depth setup` | once: install the segmentation venv, so widgets can sit *behind* the wallpaper's subject |
+| `wallflow overlay` | `start` / `stop` / `restart` / `status` of the widget + subject layer |
 | `wallflow rename [--dry-run]` | rename wallpapers per `rename.mode` (0 off / 1 prefix / 2 full) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
 | `wallflow setup --redetect` | re-run detection (new GPU, new monitor, switched backend) |
@@ -88,6 +90,37 @@ pipes      pipes.sh keeps the palette after its screen reset (drop-in wrapper)
 away, and from then on re-renders (+ reloads the app where possible) on every change.
 `remove` undoes exactly what `install` did. Writing your own is a folder with an `addon.toml` and a
 template — see `addons/README.md`.
+
+### Depth overlay — widgets behind the character
+
+`wallflow addons install clock` puts a clock on the wallpaper. With `wallflow depth setup` run once,
+it sits *behind* the wallpaper's subject: the foreground (character) is segmented into a
+transparent cutout and drawn on top of the widgets — a layered composite, not real 3D.
+
+```
+ windows                      (normal Hyprland toplevels)
+ ── bottom layer ───────────  wallflow-overlay (quickshell, click-through)
+      subject cutout           ~/.cache/wallflow/cutouts/<hash>.png
+      widgets                  ~/.config/wallflow/widgets/*.qml   (clock, …)
+ ── background layer ───────  mpvpaper / caelestia / swww / hyprpaper
+```
+
+- **Overlay** = one `quickshell` window per monitor on the `bottom` layer (`wallflow overlay start`,
+  autostarted from the Hyprland block, `overlay.enabled`). It never takes input. It watches
+  `~/.cache/wallflow/overlay.json`, which wallflow rewrites on every wallpaper change and every
+  `wallflow config set overlay.*` — so moving the clock is live, no restart.
+- **Cutouts** come from [rembg](https://github.com/danielgatis/rembg) (`isnet-anime` by default,
+  `depth.model`) in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
+  dependency-light. Made lazily in the background the first time an image is applied (a few seconds
+  on CPU; `--gpu` at setup for onnxruntime-gpu), cached by path+mtime+model like transcodes, and
+  fade in when done. Images with no discernible subject (landscapes) get a `.skip` marker and the
+  widgets simply sit on top. `wallflow depth` pre-segments the whole folder, `--prune` cleans up,
+  `depth.prewarm = true` lets `wallflow watch` do it ahead of time.
+- **Videos / GIFs** get no cutout in v1 (that would need a per-frame matte) — widgets sit on top.
+- **Clock**: `overlay.clock_x` / `clock_y` (fractions of the screen), `clock_size` (px),
+  `clock_format` / `clock_date_format` (Qt formats, `""` hides the date), `clock_font`, `clock_weight`,
+  `clock_color`, `clock_opacity`, `clock_shadow`. `overlay.outputs = "DP-1"` limits it to one monitor.
+- **Own widgets**: an addon with `widget = "<file>.qml"` — see `addons/README.md`.
 
 ### Hidden wallpapers
 
@@ -146,6 +179,8 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
+[depth]    enabled, model = "isnet-anime", alpha_matting, prewarm — subject cutouts (needs `wallflow depth setup`)
+[overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
 [hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), config_file (auto), manage = true
@@ -157,8 +192,9 @@ your values) or `wallflow config set hypr.bind 'SUPER + SHIFT + W'` (rewrites th
 ## Requirements
 
 `python ≥ 3.11`, `PySide6` (+ Qt Quick), `mpvpaper`, `ffmpeg`, optional `wallust` (theming),
-`qt6-imageformats` (webp/tiff thumbnails). Arch: all handled by `install.sh`. Elsewhere `mpvpaper`
-and `wallust` may need a manual build (`cargo install wallust`).
+`qt6-imageformats` (webp/tiff thumbnails), optional `quickshell` (depth overlay / clock) and, for
+subject cutouts, `wallflow depth setup` (pip-installs rembg into its own venv). Arch: all handled by
+`install.sh`. Elsewhere `mpvpaper` and `wallust` may need a manual build (`cargo install wallust`).
 
 Hyprland config: the managed block is written in Lua for `hyprland.lua` and hyprlang for
 `hyprland.conf`. Uninstall with `./uninstall.sh` (`--purge` also removes config and cache).
@@ -167,7 +203,8 @@ Hyprland config: the managed block is written in Lua for `hyprland.lua` and hypr
 
 ```
 wallflow.py        entry point
-wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · watcher · addons · ui · rename
-addons/<name>/     addon.toml + wallust template
+wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · watcher · addons · ui · rename · depth · overlay
+wallflow/templates overlay.qml (the quickshell layer) · sequences (wallust OSC template)
+addons/<name>/     addon.toml + wallust template and/or widget .qml
 install.sh · uninstall.sh
 ```

@@ -1,0 +1,5 @@
+name = "clock"
+description = "clock (+ date) widget on the depth overlay — sits between wallpaper and subject"
+requires = ["qs"]
+widget = "clock.qml"
+note = "Position/size/format live in config.toml [overlay]: clock_x/clock_y are fractions of the screen (0.5 = centre), clock_size in px, clock_format / clock_date_format are Qt date formats (\"\" hides the date). `wallflow config set overlay.clock_y 0.2` applies live. Run `wallflow depth setup` once if the clock should sit *behind* the wallpaper's subject."

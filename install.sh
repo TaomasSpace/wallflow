@@ -44,6 +44,8 @@ install_deps() {
     if have pacman; then
         say "Arch: installing dependencies"
         sudo pacman -S --needed --noconfirm python pyside6 qt6-declarative qt6-imageformats ffmpeg jq
+        # the depth overlay (widgets between wallpaper and subject) renders via quickshell
+        have qs || sudo pacman -S --needed --noconfirm quickshell || warn "quickshell not installed — the overlay/clock addon needs it (optional)"
         local aur=""
         for h in paru yay; do have "$h" && aur="$h" && break; done
         for pkg in mpvpaper wallust; do            # both are AUR, not in the official repos
@@ -62,11 +64,13 @@ install_deps() {
             warn "some packages failed — see README for manual steps"
         have mpvpaper || warn "mpvpaper is not packaged here: build it from https://github.com/GhostNaN/mpvpaper"
         have wallust  || warn "wallust missing: cargo install wallust  (or a release binary)"
+        have qs       || warn "quickshell missing (optional, overlay/clock): https://quickshell.org"
     elif have dnf; then
         say "Fedora: installing what's packaged"
         sudo dnf install -y python3 python3-pyside6 ffmpeg jq || warn "some packages failed"
         have mpvpaper || warn "mpvpaper: try 'dnf install mpvpaper' or build from source"
         have wallust  || warn "wallust missing: cargo install wallust"
+        have qs       || warn "quickshell missing (optional, overlay/clock): https://quickshell.org"
     else
         warn "unknown distro — make sure python3, PySide6, mpvpaper, ffmpeg, wallust are installed"
     fi
@@ -109,4 +113,6 @@ echo
 say "done. Press your bind (default SUPER+W) or run 'wallflow'."
 echo "    wallflow addons list       # terminal colour addons (cava, kitty, foot, …)"
 echo "    wallflow transcode         # pre-transcode all video wallpapers now (optional)"
+echo "    wallflow addons install clock  # clock widget on the depth overlay"
+echo "    wallflow depth setup       # once: subject cutouts, so widgets sit *behind* the character"
 echo "    wallflow config edit       # tweak anything"

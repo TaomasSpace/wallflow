@@ -60,6 +60,30 @@ DEFAULTS: dict = {
         "quality": 28,                # cq/crf/qp — lower = better/bigger
         "vaapi_device": "",           # auto-detected; e.g. /dev/dri/renderD128
     },
+    "depth": {
+        # subject cutout for the overlay (needs `wallflow depth setup` once; no-op until then)
+        "enabled": True,
+        "model": "isnet-anime",       # rembg model: isnet-anime | isnet-general-use | u2net | birefnet-general
+        "alpha_matting": False,       # finer edges (hair), several times slower
+        "prewarm": False,             # let `wallflow watch` segment every image ahead of time
+    },
+    "overlay": {
+        # the click-through layer between wallpaper and windows (quickshell)
+        "enabled": True,
+        "outputs": "*",               # "*" = every monitor, or "DP-1,HDMI-A-1"
+        "fill": "crop",               # how the cutout is fitted: crop (= cover, what the backends do) | fit
+        # clock widget (`wallflow addons install clock`) — fractions of the screen, px, Qt formats
+        "clock_x": 0.5,
+        "clock_y": 0.12,
+        "clock_size": 140,
+        "clock_format": "HH:mm",
+        "clock_date_format": "dddd, d MMMM",   # "" = no date line
+        "clock_font": "",             # "" = system sans
+        "clock_weight": "light",      # thin | light | normal | bold | black
+        "clock_color": "#ffffff",
+        "clock_opacity": 0.92,
+        "clock_shadow": True,
+    },
     "rename": {
         # 0 = off, 1 = prefix animated files with animated_prefix (sort by type only),
         # 2 = full rename to <animated_wallpaper_prefix>_N / <wallpaper_prefix>_N
