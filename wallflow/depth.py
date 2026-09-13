@@ -28,22 +28,84 @@ from . import config, paths
 
 # Runs inside the venv (own python, own site-packages); wallflow never imports rembg.
 _WORKER = r"""
-import sys
+# argv: src dst mode near feather subject_model depth_model alpha_matting depthmap_path
+import sys, os
 from io import BytesIO
-src, dst, model, am = sys.argv[1:5]
-from rembg import new_session, remove
+import numpy as np
 from PIL import Image
-with open(src, "rb") as f:
-    data = f.read()
-out = remove(data, session=new_session(model), post_process_mask=True,
-             alpha_matting=(am == "1"))
-img = Image.open(BytesIO(out)).convert("RGBA")
-alpha = img.getchannel("A")
-hist = alpha.histogram()
-opaque = sum(hist[16:])                      # pixels that are more than faintly visible
-if opaque < 0.005 * img.width * img.height:  # < 0.5 %: nothing worth occluding with
+src, dst, mode, near, feather, smodel, dmodel, am, dmap = sys.argv[1:10]
+near, feather = float(near), float(feather)
+img = Image.open(src).convert("RGB")
+W, H = img.size
+rgb = np.asarray(img)
+
+def box(a, r):
+    # O(1) box filter via integral image, replicate borders
+    a = np.pad(a, ((r, r), (r, r)), mode="edge")
+    c = np.cumsum(np.cumsum(a, 0), 1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    d = 2 * r + 1
+    return (c[d:, d:] - c[:-d, d:] - c[d:, :-d] + c[:-d, :-d]) / (d * d)
+
+def guided(alpha, guide, r, eps):
+    # He et al. guided filter, grey guide: snaps the soft depth mask to real image edges
+    mI, mp = box(guide, r), box(alpha, r)
+    cov = box(guide * alpha, r) - mI * mp
+    var = box(guide * guide, r) - mI * mI
+    a = cov / (var + eps); b = mp - a * mI
+    return np.clip(box(a, r) * guide + box(b, r), 0, 1)
+
+def depth_alpha():
+    if os.path.exists(dmap):
+        d = np.load(dmap).astype(np.float32)
+    else:
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(dmodel, "onnx/model.onnx")
+        prov = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in ort.get_available_providers()]
+        sess = ort.InferenceSession(path, providers=prov)
+        name = sess.get_inputs()[0].name
+        mean = np.array([0.485, 0.456, 0.406], np.float32); std = np.array([0.229, 0.224, 0.225], np.float32)
+        def infer(nw, nh):
+            x = np.asarray(img.resize((nw, nh), Image.BICUBIC)).astype(np.float32) / 255.0
+            x = ((x - mean) / std).transpose(2, 0, 1)[None]
+            return sess.run(None, {name: x})[0][0]
+        sc = 518.0 / max(W, H)
+        nw = max(14, int(round(W * sc / 14)) * 14); nh = max(14, int(round(H * sc / 14)) * 14)
+        try:
+            out = infer(nw, nh)                      # dynamic shapes (keeps aspect)
+        except Exception:
+            out = infer(518, 518)                    # static export
+        out = np.asarray(out, np.float32)
+        if out.ndim == 3: out = out[0]
+        out = (out - out.min()) / (out.max() - out.min() + 1e-6)   # relative inverse depth: 1 = nearest
+        d = np.asarray(Image.fromarray(out, "F").resize((W, H), Image.BILINEAR), np.float32)
+        np.save(dmap, d.astype(np.float16))
+    t = 1.0 - near
+    a = np.clip((d - t) / max(feather, 1e-3) + 0.5, 0, 1)
+    guide = (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)) / 255.0
+    r = max(4, int(round(0.004 * max(W, H))))
+    return guided(a, guide, r, 1e-3)
+
+def subject_alpha():
+    from rembg import new_session, remove
+    with open(src, "rb") as f:
+        data = f.read()
+    m = remove(data, session=new_session(smodel), post_process_mask=True,
+               alpha_matting=(am == "1"), only_mask=True)
+    return np.asarray(Image.open(BytesIO(m)).convert("L"), np.float32) / 255.0
+
+if mode == "subject":
+    alpha = subject_alpha()
+elif mode == "both":
+    alpha = np.maximum(depth_alpha(), subject_alpha())
+else:
+    alpha = depth_alpha()
+
+if (alpha > 0.06).sum() < 0.005 * W * H:      # < 0.5 %: nothing worth occluding with
     sys.exit(3)
-img.save(dst, "PNG", optimize=False)
+out = np.dstack([rgb, (alpha * 255 + 0.5).astype(np.uint8)])
+Image.fromarray(out, "RGBA").save(dst, "PNG", optimize=False)
 """
 
 
@@ -76,7 +138,7 @@ def setup(gpu: bool = False, python: str = "", log=print) -> int:
     extra = "gpu" if gpu else "cpu"
     log(f"installing rembg[{extra}] (a few hundred MB, one-off) …")
     r = subprocess.run([str(vp), "-m", "pip", "install", "--upgrade", "--quiet",
-                        f"rembg[{extra}]", "pillow"])
+                        f"rembg[{extra}]", "pillow", "numpy", "huggingface_hub"])
     if r.returncode != 0:
         log("pip failed — if no onnxruntime wheel exists for this python yet, use an older one:\n"
             "    wallflow depth setup --python python3.12   (Arch: pacman -S python312, or `uv python install 3.12`)")
@@ -84,7 +146,7 @@ def setup(gpu: bool = False, python: str = "", log=print) -> int:
     if gpu:
         log("note: onnxruntime-gpu needs CUDA + cuDNN libraries on the system; if cutouts fail, "
             "rerun `wallflow depth setup` without --gpu")
-    log("done — the segmentation model downloads on first use (~170 MB to ~/.u2net)")
+    log("done — models download on first use (rembg -> ~/.u2net, Depth Anything -> ~/.cache/huggingface)")
     return 0
 
 
@@ -120,8 +182,20 @@ def notify(title: str, body: str = "", urgency: str = "low") -> None:
 def target(src: str, cfg: dict) -> Path:
     st = os.stat(src)
     d = cfg["depth"]
-    key = f"{src}:{st.st_mtime_ns}:{d['model']}:{int(bool(d['alpha_matting']))}"
+    key = f"{src}:{st.st_mtime_ns}:{d['mode']}"
+    if d["mode"] in ("subject", "both"):
+        key += f":{d['model']}:{int(bool(d['alpha_matting']))}"
+    if d["mode"] in ("depth", "both"):
+        key += f":{d['depth_model']}:{float(d['near']):.3f}:{float(d['feather']):.3f}"
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
+
+
+def depthmap_path(src: str, cfg: dict) -> Path:
+    """The raw depth map is cached on its own: retuning depth.near/feather then
+    only redoes the (fast) thresholding, not the model."""
+    st = os.stat(src)
+    key = f"{src}:{st.st_mtime_ns}:{cfg['depth']['depth_model']}"
+    return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".depth.npy")
 
 
 def applicable(src: str, cfg: dict) -> bool:
@@ -177,8 +251,9 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
             return None
         tmp = dst.with_suffix(".part.png")
         d = cfg["depth"]
-        cmd = [str(venv_python()), "-c", _WORKER, src, str(tmp), d["model"],
-               "1" if d["alpha_matting"] else "0"]
+        cmd = [str(venv_python()), "-c", _WORKER, src, str(tmp), d["mode"],
+               str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
+               "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg))]
         out = subprocess.DEVNULL if quiet else None
         r = subprocess.run(cmd, stdout=out, stderr=out)
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
@@ -254,7 +329,9 @@ def status_text(cfg: dict) -> str:
     d = cfg["depth"]
     lines = [
         f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
-        f"model    : {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
+        f"mode     : {d['mode']}  (depth = what's nearest, subject = the character, both = union)",
+        f"models   : depth {d['depth_model']} (near {d['near']}, feather {d['feather']})"
+        f" · subject {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
         f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",
         f"images   : {len(imgs)} total, {have} with cutout, {skipped} without subject, "
         f"{len([f for f in imgs if f in off])} switched off, {len(pending(cfg))} pending",
@@ -273,10 +350,10 @@ def prune(cfg: dict) -> int:
     """Delete cutouts whose source no longer exists / settings changed."""
     from .backend import gather_wallpapers
     keep = set()
-    for f in gather_wallpapers(cfg):
+    for f in gather_wallpapers(cfg, include_hidden=True):
         if not config.is_video(cfg, f):
             t = target(f, cfg)
-            keep.update({t.name, t.with_suffix(".skip").name})
+            keep.update({t.name, t.with_suffix(".skip").name, depthmap_path(f, cfg).name})
     n = 0
     for p in paths.CUTOUT_DIR.glob("*") if paths.CUTOUT_DIR.is_dir() else []:
         if p.name not in keep:

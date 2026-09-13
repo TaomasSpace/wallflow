@@ -231,6 +231,11 @@ def _cmd_config(a, cfg):
             hypr.install(config.load()); hypr.reload()
         if any(k.startswith(("overlay.", "depth.")) for k in keys):
             overlay.ensure(config.load())      # live: the overlay watches its state file
+        if any(k.startswith("depth.") for k in keys):
+            cur = backend.read_current()       # retune -> recompute the current cutout right away
+            if cur and depth.wanted(cur, config.load()):
+                backend._spawn_background_cutout(cur)
+                print("  recomputing the cutout for the current wallpaper in the background")
         if "depth.auto" in keys and cfg["depth"]["auto"]:
             print("! depth.auto: `wallflow watch` will now segment every new image in the background "
                   "(and any image still missing a cutout) — slow on CPU, you'll get a notification "

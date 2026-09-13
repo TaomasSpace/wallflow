@@ -110,13 +110,22 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   autostarted from the Hyprland block, `overlay.enabled`). It never takes input. It watches
   `~/.cache/wallflow/overlay.json`, which wallflow rewrites on every wallpaper change and every
   `wallflow config set overlay.*` — so moving the clock is live, no restart.
-- **Cutouts** come from [rembg](https://github.com/danielgatis/rembg) (`isnet-anime` by default,
-  `depth.model`; `birefnet-general` + `depth.alpha_matting = true` gives the cleanest edges on
-  photo-like renders) in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
+- **What lands on the 3D layer** (`depth.mode`):
+  - `depth` (default) — whatever is *nearest to the camera*, from a monocular depth map
+    ([Depth Anything V2](https://huggingface.co/onnx-community/depth-anything-v2-small), ONNX). A fan
+    in the corner, the wall you're sitting on, foam drifting over a face — not necessarily the
+    character. `depth.near` = how much of the depth range counts as foreground (0.3 = nearest 30 %),
+    `depth.feather` = softness of the cut; edges are snapped to the image with a guided filter. The
+    depth map is cached separately, so retuning `near`/`feather` is fast — `wallflow config set
+    depth.near 0.4` recomputes the current wallpaper in the background.
+  - `subject` — the salient subject/character via [rembg](https://github.com/danielgatis/rembg)
+    (`depth.model`: `isnet-anime`, or `birefnet-general` + `depth.alpha_matting = true` for the
+    cleanest edges on photo-like renders).
+  - `both` — union of the two.
+- Everything runs in its own venv at `~/.local/share/wallflow-depth`, so wallflow itself stays
   dependency-light. Made lazily in the background the first time an image is applied (you get a
-  notification while it runs, `depth.notify`), cached by path+mtime+model like transcodes, and fade in
-  when done. Images with no discernible subject (landscapes) get a `.skip` marker and the widgets
-  simply sit on top.
+  notification while it runs, `depth.notify`), cached by path+mtime+settings like transcodes, and fade
+  in when done. Images with nothing in front get a `.skip` marker and the widgets simply sit on top.
 - **Timing**: seconds per image with `isnet-*` on CPU, up to a couple of minutes with birefnet +
   matting at 4K. `wallflow depth setup --gpu` (needs `cuda` + `cudnn`) makes it near-instant.
 - **All at once**: `wallflow depth all` (alias `wallflow 3d`) segments every image that has no cutout
@@ -193,7 +202,7 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
-[depth]    enabled, model = "isnet-anime", alpha_matting, auto, notify — subject cutouts (needs `wallflow depth setup`)
+[depth]    enabled, mode = "depth"|"subject"|"both", near, feather, depth_model, model, alpha_matting, auto, notify
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows

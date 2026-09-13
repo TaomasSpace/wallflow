@@ -61,10 +61,19 @@ DEFAULTS: dict = {
         "vaapi_device": "",           # auto-detected; e.g. /dev/dri/renderD128
     },
     "depth": {
-        # subject cutout for the overlay (needs `wallflow depth setup` once; no-op until then)
+        # foreground cutout for the overlay (needs `wallflow depth setup` once; no-op until then)
         "enabled": True,
-        "model": "isnet-anime",       # rembg model: isnet-anime | isnet-general-use | u2net | birefnet-general
-        "alpha_matting": False,       # finer edges (hair), several times slower
+        # what goes on the 3D layer:
+        #   "depth"   = whatever is nearest to the camera (Depth Anything V2) — a fan in the
+        #               corner, a wall in front, foam over a face, …
+        #   "subject" = the salient subject/character (rembg), regardless of depth
+        #   "both"    = union of the two
+        "mode": "depth",
+        "depth_model": "onnx-community/depth-anything-v2-small",   # …-base / …-large: better, slower
+        "near": 0.30,                 # fraction of the depth range (from the nearest point) that counts as foreground
+        "feather": 0.08,              # softness of the near/far boundary (fraction of the depth range)
+        "model": "isnet-anime",       # rembg model for subject/both: isnet-anime | isnet-general-use | birefnet-general
+        "alpha_matting": False,       # subject/both: finer edges (hair), several times slower
         "auto": False,                # `wallflow watch` segments new images as they appear (slow on CPU!)
         "notify": True,               # desktop notification while a cutout is being made in the background
     },
