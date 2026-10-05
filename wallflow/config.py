@@ -73,6 +73,8 @@ DEFAULTS: dict = {
         #   "depth"   = the near group only, no character logic
         #   "subject" = the salient subject/character (rembg), regardless of depth
         #   "both"    = union of depth and subject
+        #   "learned" = a model trained on your `wallflow depth edit` masks (`wallflow depth train`);
+        #               behaves like "auto" until one exists
         "mode": "auto",
         "depth_model": "onnx-community/depth-anything-v2-small",   # …-base / …-large: better, slower
         "near": "auto",               # "auto" = per-image histogram split; or a number = fraction of the
@@ -89,6 +91,7 @@ DEFAULTS: dict = {
         # pointed at. Model = facebook/sam2.1-hiera-{large,base-plus,small,tiny}; smaller = faster
         # on CPU, large is best and quick on a GPU (`wallflow depth setup --gpu`)
         "edit_model": "facebook/sam2.1-hiera-large",
+        "train_every": 10,            # retrain the learned model after every N new masks (0 = only by hand)
         "notify": True,               # desktop notification while a cutout is being made in the background
     },
     "overlay": {

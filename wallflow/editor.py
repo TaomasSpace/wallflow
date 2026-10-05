@@ -23,7 +23,8 @@ HINTS = ("click  object   ·   wheel  smaller / bigger   ·   Shift+click / Shif
          "Alt+drag  exact shape")
 KEYS = ("Space  preview with clock   ·   middle-click  move preview clock   ·   A  automatic   ·   "
         "C  clear   ·   Ctrl+Z  undo   ·   Enter  apply   ·   Del  back to automatic   ·   Esc  cancel")
-START = {"saved": "your saved mask", "manual": "your hand-picked layer", "auto": "the automatic cutout",
+START = {"saved": "your saved mask", "manual": "your hand-picked layer", "learned": "the learned guess",
+         "auto": "the automatic cutout",
          "subject": "the character", "empty": "nothing"}
 
 
@@ -298,8 +299,15 @@ def build(src: str, cfg: dict):
             objects.save_manual(self.src, None if empty else str(out), p.get("coverage", 0.0))
             depth.set_enabled(self.src, True)
             objects.refresh_overlay(self.src, self.cfg)
-            self.result = ("saved", "nothing in front — 3D layer empty for this image" if empty else
-                           f"{p.get('coverage', 0) * 100:.0f}% of the image on the 3D layer → {out.name}")
+            msg = ("nothing in front — 3D layer empty for this image" if empty else
+                   f"{p.get('coverage', 0) * 100:.0f}% of the image on the 3D layer → {out.name}")
+            try:
+                from . import learn
+                if learn.maybe_retrain(self.cfg):
+                    msg += "\nlearning from your masks in the background (`wallflow depth` shows the result)"
+            except Exception as ex:                    # never lose a save over the trainer
+                msg += f"\n(could not start training: {ex})"
+            self.result = ("saved", msg)
             self.close()
 
         def back_to_auto(self) -> None:

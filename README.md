@@ -192,6 +192,25 @@ Lit = on the 3D layer (above your widgets), dimmed = stays behind.
   `facebook/sam2.1-hiera-small` or `-tiny`. After updating wallflow run `wallflow depth setup` once
   more so the venv gets torch + SAM 2.1.
 
+#### Learning your taste (`wallflow depth train`)
+
+Every mask you apply in the editor is training data. `wallflow depth train` fits a small model on
+top of SAM 2.1's image features and the depth map that predicts what *you* put in front — floors
+or ledges, which mountain layer, whether the sun counts. SAM already knows what things are; the
+model only learns your rule, so it starts from a few dozen masks and trains in about a minute on a GPU.
+
+- **Use it**: the editor opens new wallpapers with its guess (you only fix the mistakes);
+  `wallflow config set depth.mode learned` makes it the automatic cutout too (it behaves like
+  `auto` until a model exists). Hand-picks always win over it.
+- **It keeps learning**: after every `depth.train_every` (10) new masks it retrains in the background
+  (log: `~/.cache/wallflow/learn.log`, notification when done). Retraining re-makes learned
+  cutouts lazily, the current wallpaper right away. `train_every = 0` = only by hand.
+- **How good is it?** With 10+ masks, training first holds a fifth of the wallpapers back and reports
+  how well it matches your masks on those (IoU) — `wallflow depth` shows the last result. The fastest
+  way up is masking the kinds of wallpaper it gets wrong, not more of what it already gets right.
+- The model is `~/.local/share/wallflow-masks/learned.pt`, next to the masks. Changing
+  `depth.edit_model` needs a retrain (the features differ).
+
 ### Hidden wallpapers
 
 A `hidden` subfolder is auto-created directly inside `wallpaper_dir` (`wallflow setup` creates it
@@ -249,8 +268,8 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
-[depth]    enabled, mode = "auto"|"near"|"depth"|"subject"|"both", near ("auto"|0..1), feather, min_separation, occluder_margin, depth_model, model, alpha_matting, auto, notify,
-           edit_model (the 3D-layer editor)
+[depth]    enabled, mode = "auto"|"near"|"depth"|"subject"|"both"|"learned", near ("auto"|0..1), feather, min_separation, occluder_margin, depth_model, model, alpha_matting, auto, notify,
+           edit_model, train_every (the 3D-layer editor + learning)
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
@@ -275,7 +294,7 @@ Hyprland config: the managed block is written in Lua for `hyprland.lua` and hypr
 ```
 wallflow.py        entry point
 wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · watcher · addons · ui · rename · depth · overlay
-                   objects (hand-picked layer) · editor (3D-layer editor) · pick_worker (runs in the depth venv: SAM 2.1)
+                   objects (hand-picked layer) · editor (3D-layer editor) · learn (training) · pick_worker (depth venv: SAM 2.1 + learned model)
 wallflow/templates overlay.qml (the quickshell layer) · sequences (wallust OSC template)
 addons/<name>/     addon.toml + wallust template and/or widget .qml
 install.sh · uninstall.sh

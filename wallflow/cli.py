@@ -16,6 +16,7 @@
   wallflow depth edit [file]   point at what goes on the 3D layer, SAM 2.1 cuts it out (E in the picker)
   wallflow depth edit reset [file]     drop the hand-picked layer (back to automatic)
   wallflow depth edit import DIR       turn saved masks (e.g. ~/.local/share/depthfg/masks) into hand-picks
+  wallflow depth train         learn your taste from those masks (depth.mode learned uses it)
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
@@ -33,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 from . import __version__, addons, backend, config, depth, overlay, paths, rename, transcode
 
@@ -122,6 +124,13 @@ def _cmd_depth(a, cfg):
         return
     if a.action == "edit":
         return _cmd_edit(a, cfg)
+    if a.action == "train":
+        from . import learn
+        if a.background:                   # started after a save; output goes to learn.log
+            def stamped(*x, **_k):
+                print(time.strftime("%H:%M:%S"), *x, flush=True)
+            return learn.train(cfg, log=stamped, notify=bool(cfg["depth"]["notify"]))
+        return learn.train(cfg)
     if a.action in ("tune", "map"):
         toks = [t for t in [a.name, *(a.extra or [])] if t]
         kv = [t for t in toks if "=" in t]
@@ -379,7 +388,8 @@ def build_parser():
     x.set_defaults(fn=_cmd_transcode)
 
     x = sp.add_parser("depth", help="3D subject cutouts for the overlay (rembg in its own venv)")
-    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off", "tune", "map", "edit"])
+    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off", "tune", "map", "edit",
+                                                 "train"])
     x.add_argument("name", nargs="?", help="on/off/tune/map/edit: image file (default: current wallpaper)")
     x.add_argument("extra", nargs="*", help="tune: key=value … / reset · edit: reset / import DIR")
     x.add_argument("--yes", "-y", action="store_true", help="all: skip the 'this takes long' prompt")
@@ -389,6 +399,7 @@ def build_parser():
     x.add_argument("--swap", action="store_true", help="hand the cutout to the overlay when done (internal)")
     x.add_argument("--force", action="store_true", help="recompute")
     x.add_argument("--prune", action="store_true", help="delete stale cutouts")
+    x.add_argument("--background", action="store_true", help="train: started after a save (internal)")
     x.add_argument("-v", "--verbose", action="store_true")
     x.set_defaults(fn=_cmd_depth)
 

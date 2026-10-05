@@ -358,9 +358,14 @@ def set_tune(src: str, values: dict | None) -> dict:
 
 
 def settings(src: str, cfg: dict) -> dict:
-    """[depth] with this image's overrides applied."""
+    """[depth] with this image's overrides applied. mode "learned" without a trained model
+    behaves like "auto" until `wallflow depth train` has run."""
     d = dict(cfg["depth"])
     d.update(tunes().get(os.path.abspath(src), {}))
+    if d["mode"] == "learned":
+        from . import learn
+        if not learn.ready(cfg):
+            d["mode"] = "auto"
     return d
 
 
@@ -385,6 +390,9 @@ def target(src: str, cfg: dict) -> Path:
         key += f":{float(d['min_separation']):.2f}"
     if d["mode"] == "auto":
         key += f":{float(d['occluder_margin']):.3f}"
+    if d["mode"] == "learned":                 # retraining makes new cutouts (lazily, on next use)
+        from . import learn, objects
+        key += f":{objects.edit_model(cfg)}:{learn.stamp()}"
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
@@ -462,7 +470,11 @@ def run(src: str, cfg: dict, force: bool = False, quiet: bool = True, wait: bool
         if skip.exists() and not force:
             return None
         tmp = dst.with_suffix(".part.png")
-        cmd = _worker_cmd(src, str(tmp), cfg)
+        if settings(src, cfg)["mode"] == "learned":
+            from . import learn
+            cmd = learn.auto_cmd(src, str(tmp), cfg)
+        else:
+            cmd = _worker_cmd(src, str(tmp), cfg)
         global last_error
         last_error = ""
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -499,8 +511,9 @@ def _fmt_secs(s: float) -> str:
 
 def _worker_cmd(src: str, dst: str, cfg: dict, preview: bool = False) -> list[str]:
     d = settings(src, cfg)
+    mode = "auto" if d["mode"] == "learned" else d["mode"]      # the depth map view has no learned mode
     return [str(venv_python()), "-c", _WORKER, src, dst,
-            ("preview:" if preview else "") + d["mode"],
+            ("preview:" if preview else "") + mode,
             str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
             "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg)),
             str(d["min_separation"]), str(d["occluder_margin"]), str(subject_path(src, cfg))]
@@ -591,7 +604,7 @@ def status_text(cfg: dict) -> str:
     picked = sum(1 for f in imgs if objects.has_manual(f))
     lines = [
         f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
-        f"mode     : {d['mode']}  (auto = subject + what's nearer than it · near = nearest depth group · depth · subject · both)",
+        f"mode     : {d['mode']}  (learned = your taste · auto = subject + what's nearer than it · near · depth · subject · both)",
         f"models   : depth {d['depth_model']} (near {d['near']}, feather {d['feather']})"
         f" · subject {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
         f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",
@@ -611,8 +624,10 @@ def status_text(cfg: dict) -> str:
     lines.append(f"edit     : {picked} image(s) hand-picked, {objects.masks_saved()} mask(s) saved as training data"
                  f" · {objects.edit_model(cfg).split('/')[-1]} "
                  + ("ready" if objects.editor_ready() else "not installed — `wallflow depth setup` once more"))
+    from . import learn
+    lines.append(f"learned  : {learn.status_line(cfg)}")
     lines.append("           wallflow depth all | on|off [file] | tune k=v … [file] | map [file] | --prune")
-    lines.append("           wallflow depth edit [file] | edit reset [file] | edit import DIR")
+    lines.append("           wallflow depth edit [file] | edit reset [file] | edit import DIR | train")
     return "\n".join(lines)
 
 

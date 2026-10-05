@@ -175,16 +175,174 @@ class Sam:
         with self.torch.inference_mode(), self._ctx():
             self.pred.set_image(rgb)
 
-    def predict(self, points=None, labels=None, box=None, multi=True):
+    def predict(self, points=None, labels=None, box=None, multi=True, mask_input=None):
         kw = {"multimask_output": multi}
         if points:
             kw["point_coords"] = np.asarray(points, np.float32)
             kw["point_labels"] = np.asarray(labels, np.int32)
         if box is not None:
             kw["box"] = np.asarray(box, np.float32)
+        if mask_input is not None:
+            kw["mask_input"] = np.asarray(mask_input, np.float32)
         with self.torch.inference_mode(), self._ctx():
             masks, scores, _ = self.pred.predict(**kw)
         return np.asarray(masks) > 0.5, np.asarray(scores, np.float32)
+
+    def features(self):
+        """The image encoder's output for the current image, float32 on the model's device:
+        (256 ch @ 64x64, 64 ch @ 128x128, 32 ch @ 256x256) - what the learned head reads."""
+        f = self.pred._features
+        hi = f["high_res_feats"]
+        return f["image_embed"].float(), hi[1].float(), hi[0].float()
+
+
+# --- the learned guess ("learn my taste") -------------------------------------------------------
+# A small head on top of SAM 2.1's frozen image features + the depth map predicts which
+# pixels you put in front. SAM already knows what things are; the head only learns your
+# rule for what goes forward, so a few dozen masks are enough to start. Its 256x256 output
+# lives in SAM's own (square, 1024px) frame, which is also what SAM's decoder takes as a
+# mask prompt - so each predicted region is re-cut by SAM for crisp edges.
+
+HEAD_VERSION = 1
+
+
+def make_head():
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    def block(i, o):
+        return nn.Sequential(nn.Conv2d(i, o, 3, padding=1), nn.GroupNorm(8, o), nn.GELU())
+
+    class Head(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.drop = nn.Dropout2d(0.1)
+            self.a = nn.Sequential(block(256 + 2, 128), block(128, 128))      # features + depth + height
+            self.glob = nn.Linear(128, 128)
+            self.b = block(128 + 64 + 1, 64)
+            self.c = nn.Sequential(block(64 + 32 + 1, 32), nn.Conv2d(32, 1, 1))
+
+        def forward(self, e, f1, f0, d):
+            n = e.shape[0]
+            d64 = F.interpolate(d, size=(64, 64), mode="area")
+            d128 = F.interpolate(d, size=(128, 128), mode="area")
+            ys = torch.linspace(-1, 1, 64, device=e.device).view(1, 1, 64, 1).expand(n, 1, 64, 64)
+            x = self.a(torch.cat([self.drop(e), d64, ys], 1))
+            x = x + self.glob(x.mean((2, 3)))[:, :, None, None]       # whole-image context
+            x = F.interpolate(x, size=(128, 128), mode="bilinear", align_corners=False)
+            x = self.b(torch.cat([x, f1, d128], 1))
+            x = F.interpolate(x, size=(256, 256), mode="bilinear", align_corners=False)
+            return self.c(torch.cat([x, f0, d], 1))
+
+    return Head()
+
+
+def depth_small(a: dict, small: np.ndarray) -> np.ndarray:
+    """Depth (1 = near) at the working size: wallflow's cached map if the automatic cutout
+    already made one, else our own small cache, else Depth Anything V2 (ONNX) right now."""
+    H, W = small.shape[:2]
+
+    def norm(d):
+        d = np.asarray(Image.fromarray(np.asarray(d, np.float32), "F").resize((W, H), Image.BILINEAR), np.float32)
+        lo, hi = np.percentile(d, 1), np.percentile(d, 99)
+        return np.clip((d - lo) / max(hi - lo, 1e-6), 0, 1)
+
+    for p in (a.get("depth_full"), a.get("depth_cache")):
+        if p and os.path.exists(p):
+            try:
+                return norm(np.load(p))
+            except Exception:
+                pass
+    import onnxruntime as ort
+    from huggingface_hub import hf_hub_download
+    path = hf_hub_download(a.get("depth_model") or "onnx-community/depth-anything-v2-small", "onnx/model.onnx")
+    prov = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in ort.get_available_providers()]
+    sess = ort.InferenceSession(path, providers=prov)
+    name = sess.get_inputs()[0].name
+    mean = np.array([0.485, 0.456, 0.406], np.float32)
+    std = np.array([0.229, 0.224, 0.225], np.float32)
+    img = Image.fromarray(small)
+
+    def infer(nw, nh):
+        x = np.asarray(img.resize((nw, nh), Image.BICUBIC)).astype(np.float32) / 255.0
+        return sess.run(None, {name: ((x - mean) / std).transpose(2, 0, 1)[None]})[0][0]
+
+    sc = 518.0 / max(W, H)
+    nw, nh = max(14, round(W * sc / 14) * 14), max(14, round(H * sc / 14) * 14)
+    try:
+        out = infer(nw, nh)
+    except Exception:
+        out = infer(518, 518)
+    out = np.asarray(out, np.float32)
+    if out.ndim == 3:
+        out = out[0]
+    d = norm(out)
+    if a.get("depth_cache"):
+        os.makedirs(os.path.dirname(a["depth_cache"]), exist_ok=True)
+        np.save(a["depth_cache"], d.astype(np.float16))
+    return d
+
+
+def depth_tensor(d: np.ndarray, torch, dev: str, flip: bool = False):
+    d256 = np.asarray(Image.fromarray(d, "F").resize((256, 256), Image.BILINEAR), np.float32)
+    if flip:
+        d256 = d256[:, ::-1].copy()
+    return torch.from_numpy(d256)[None, None].to(dev)
+
+
+_heads: dict = {}
+
+
+def load_head(path: str, torch, dev: str):
+    key = (path, os.stat(path).st_mtime_ns, dev)
+    if key not in _heads:
+        ck = torch.load(path, map_location=dev, weights_only=False)
+        if ck.get("version") != HEAD_VERSION:
+            raise RuntimeError("learned model is from another version - run `wallflow depth train`")
+        h = make_head().to(dev)
+        h.load_state_dict(ck["state"])
+        h.eval()
+        _heads.clear()
+        _heads[key] = h
+    return _heads[key]
+
+
+def learned_mask(sam: "Sam", small: np.ndarray, a: dict) -> np.ndarray | None:
+    """The head's guess for the image currently set in `sam`, re-cut by SAM for clean edges."""
+    path = a.get("learned")
+    if not path or not os.path.exists(path):
+        return None
+    torch = sam.torch
+    H, W = small.shape[:2]
+    head = load_head(path, torch, sam.dev)
+    e, f1, f0 = sam.features()
+    d = depth_tensor(depth_small(a, small), torch, sam.dev)
+    with torch.no_grad():
+        logit = head(e, f1, f0, d)[0, 0].float().cpu().numpy()             # 256x256, SAM frame
+    prob = np.asarray(Image.fromarray(1 / (1 + np.exp(-logit)), "F").resize((W, H), Image.BILINEAR))
+    rough = clean(prob > 0.5)
+    if rough.sum() < 0.002 * rough.size:
+        return rough
+    from scipy import ndimage
+    lab, n = ndimage.label(rough)
+    out = np.zeros_like(rough)
+    grow = max(2, int(0.02 * H))
+    for i in range(1, n + 1):
+        comp = lab == i
+        if comp.sum() < 0.005 * comp.size:                                 # small bits: keep as guessed
+            out |= comp
+            continue
+        ys, xs = np.nonzero(comp)
+        bx = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())]
+        try:
+            ms, _ = sam.predict(box=bx, multi=False, mask_input=np.clip(logit, -20, 20)[None])
+            r = clean(ms[0]) & ndimage.binary_dilation(comp, iterations=grow)
+            iou = (r & comp).sum() / max((r | comp).sum(), 1)
+            out |= r if iou > 0.6 else comp                                # SAM only sharpens, never swaps
+        except Exception:
+            out |= comp
+    return clean(out)
 
 
 # --- one editing session -------------------------------------------------------------------
@@ -206,12 +364,13 @@ class Session:
         self.view = (int(a["view_w"]), int(a["view_h"]), a["view_out"])
         os.makedirs(os.path.dirname(a["view_out"]) or ".", exist_ok=True)
         self.paths = {k: a.get(k) or "" for k in ("mask", "manual", "auto", "subject")}
-        self.mask, self.start = self._initial(a.get("start", "best"))
+        self.learn_args = {k: a.get(k) or "" for k in ("learned", "depth_full", "depth_cache", "depth_model")}
         self.history, self.last = [], None
         if self.sam is None:
             self.sam = self.sam_factory()
         status("reading the image")
         self.sam.set_image(self.small)
+        self.mask, self.start = self._initial(a.get("start", "best"))
         return self._view(start=self.start, seconds=round(time.monotonic() - t0, 1))
 
     def _initial(self, which: str):
@@ -220,15 +379,26 @@ class Session:
         cands = {
             "saved": lambda: load_alpha(p["mask"], W, H, alpha=False),
             "manual": lambda: load_alpha(p["manual"], W, H, alpha=True),
+            "learned": self._learned,
             "auto": lambda: load_alpha(p["auto"], W, H, alpha=True),
             "subject": lambda: load_alpha(p["subject"], W, H, alpha=False),
         }
-        order = ["saved", "manual", "auto", "subject"] if which == "best" else [which]
+        order = {"best": ["saved", "manual", "learned", "auto", "subject"],
+                 "auto": ["learned", "auto", "subject"]}.get(which, [which])
         for k in order:
             m = cands[k]() if k in cands else None
             if m is not None:
                 return clean(m), k
         return np.zeros(self.shape, bool), "empty"
+
+    def _learned(self):
+        try:
+            status("asking the learned model")
+            return learned_mask(self.sam, self.small, self.learn_args)
+        except Exception as e:
+            traceback.print_exc(file=sys.stdout)
+            say(f"(learned guess failed: {type(e).__name__}: {e})")
+            return None
 
     # -- view ---------------------------------------------------------------------------
     def _view(self, **extra) -> dict:
@@ -379,6 +549,121 @@ class Session:
         return render_cutout(self.src, self.mask, a["out"])
 
 
+# --- training -----------------------------------------------------------------------------------
+
+def _samples(sam: "Sam", jobs: list) -> tuple[list, list]:
+    """Encode every (image, mask) once, plus its mirror image. Features stay on the CPU in
+    half precision (~8 MB a sample); batches go to the GPU."""
+    torch = sam.torch
+    data, groups = [], []
+    for i, j in enumerate(jobs):
+        status(f"reading wallpaper {i + 1}/{len(jobs)}")
+        try:
+            img = load_image(j["src"])
+            W, H = work_size(*img.size)
+            small = np.asarray(img.resize((W, H), Image.LANCZOS))
+            d = depth_small(j, small)
+            m = np.asarray(Image.open(j["mask"]).convert("L").resize((256, 256), Image.BILINEAR),
+                           np.float32) / 255.0
+        except Exception as ex:
+            say(f"(skipped {os.path.basename(j['src'])}: {type(ex).__name__}: {ex})")
+            continue
+        for flip in (False, True):
+            sam.set_image(np.ascontiguousarray(small[:, ::-1]) if flip else small)
+            e, f1, f0 = (t.half().cpu() for t in sam.features())
+            dt = depth_tensor(d, torch, "cpu", flip).half()
+            mt = torch.from_numpy(np.ascontiguousarray(m[:, ::-1] if flip else m))[None, None].half()
+            data.append((e, f1, f0, dt, mt))
+            groups.append(i)
+    return data, groups
+
+
+def _fit(data: list, idx: list, steps: int, dev: str, torch, label: str):
+    import torch.nn.functional as F
+    head = make_head().to(dev)
+    opt = torch.optim.AdamW(head.parameters(), lr=1e-3, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=steps, pct_start=0.1)
+    rng = np.random.default_rng(0)
+    head.train()
+    bs = min(4, len(idx))
+    for step in range(steps):
+        pick = rng.choice(idx, size=bs, replace=len(idx) < bs)
+        batch = [torch.cat([data[k][c] for k in pick]).to(dev).float() for c in range(5)]
+        logit = head(*batch[:4])
+        y = batch[4]
+        p = torch.sigmoid(logit)
+        dice = 1 - (2 * (p * y).sum((1, 2, 3)) + 1) / (p.sum((1, 2, 3)) + y.sum((1, 2, 3)) + 1)
+        loss = F.binary_cross_entropy_with_logits(logit, y) + dice.mean()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        sched.step()
+        if step % 50 == 0 or step == steps - 1:
+            status(f"{label}: step {step + 1}/{steps}  loss {loss.item():.3f}")
+    head.eval()
+    return head
+
+
+def _iou(head, data: list, idx: list, dev: str, torch) -> float:
+    vals = []
+    with torch.no_grad():
+        for k in idx:
+            e, f1, f0, d, m = (t.to(dev).float() for t in data[k])
+            pred = head(e, f1, f0, d) > 0
+            y = m > 0.5
+            vals.append(float((pred & y).sum()) / max(float((pred | y).sum()), 1.0))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def train(a: dict) -> dict:
+    """Fit the head on every saved mask. With 10+ images a fifth of them is held out first,
+    to report how well it guesses wallpapers it has never seen; then it trains on all."""
+    t0 = time.monotonic()
+    sam = Sam(a.get("model") or "facebook/sam2.1-hiera-large")
+    torch = sam.torch
+    torch.manual_seed(0)
+    data, groups = _samples(sam, a["jobs"])
+    n_img = len(set(groups))
+    if n_img < 3:
+        raise RuntimeError(f"only {n_img} usable mask(s) - save a few more in the editor first")
+    steps = int(os.environ.get("WALLFLOW_TRAIN_STEPS") or min(3000, max(800, 30 * len(data))))
+    val_iou = None
+    if n_img >= 10:
+        held = {g for g in set(groups) if g % 5 == 4}
+        tr = [k for k, g in enumerate(groups) if g not in held]
+        va = [k for k, g in enumerate(groups) if g in held and k % 2 == 0]     # unmirrored only
+        head = _fit(data, tr, steps, sam.dev, torch, "test run")
+        val_iou = round(_iou(head, data, va, sam.dev, torch), 3)
+        status(f"on {len(held)} unseen wallpaper(s) it matches your masks {val_iou * 100:.0f}% (IoU)")
+    head = _fit(data, list(range(len(data))), steps, sam.dev, torch, "training")
+    os.makedirs(os.path.dirname(a["out"]), exist_ok=True)
+    tmp = a["out"] + ".part"
+    torch.save({"version": HEAD_VERSION, "state": head.state_dict(), "model": a.get("model"),
+                "images": n_img}, tmp)
+    os.replace(tmp, a["out"])
+    return {"images": n_img, "val_iou": val_iou, "steps": steps, "device": sam.dev.upper(),
+            "seconds": round(time.monotonic() - t0, 1)}
+
+
+def auto(a: dict) -> int:
+    """Automatic cutout with the learned model (depth.mode = "learned"). Exit 3 = nothing in front."""
+    sam = Sam(a.get("model") or "facebook/sam2.1-hiera-large")
+    img = load_image(a["src"])
+    small = np.asarray(img.resize(work_size(*img.size), Image.LANCZOS))
+    sam.set_image(small)
+    m = learned_mask(sam, small, a)
+    if m is None:
+        say("error: no learned model - run `wallflow depth train`")
+        return 1
+    if m.sum() < 0.005 * m.size:
+        return 3
+    res = render_cutout(a["src"], m, a["out"])
+    if res.get("empty"):
+        return 3
+    say(f"learned: {res['coverage'] * 100:.0f}% of the image in front")
+    return 0
+
+
 # --- entry points ------------------------------------------------------------------------------
 
 def serve(a: dict) -> None:
@@ -444,6 +729,11 @@ if __name__ == "__main__":
         if mode == "render":
             say("done: " + json.dumps(render(args)))
             sys.exit(0)
+        if mode == "train":
+            say("done: " + json.dumps(train(args)))
+            sys.exit(0)
+        if mode == "auto":
+            sys.exit(auto(args))
         say(f"error: unknown mode {mode!r}")
         sys.exit(2)
     except ModuleNotFoundError as e:

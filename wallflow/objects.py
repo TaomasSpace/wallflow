@@ -179,9 +179,11 @@ def open_args(src: str, cfg: dict, w: int, h: int) -> dict:
         subject = str(subject) if subject.exists() else ""
     except OSError:
         subject = ""
+    from . import learn
+    ch = content_hash(src)
     return {"src": src, "view_w": int(w), "view_h": int(h), "view_out": str(view_path()),
-            "mask": str(mask_path(src)), "manual": manual_cutout(src) or "", "auto": auto,
-            "subject": subject}
+            "mask": str(paths.MASK_DIR / f"{ch}.png"), "manual": manual_cutout(src) or "", "auto": auto,
+            "subject": subject, "learned": learn.model_arg(cfg), **learn.depth_args(src, cfg, ch)}
 
 
 def apply_args(src: str, out: Path) -> dict:
@@ -257,4 +259,7 @@ def import_masks(folder: str, cfg: dict, log=print) -> int:
     if cur in names:
         refresh_overlay(cur, cfg)
     log(f"imported {ok} - they're hand-picked now; `wallflow depth edit <file>` to adjust one")
+    from . import learn
+    if ok and learn.due(cfg):
+        log("enough masks to learn from: `wallflow depth train` (or it starts by itself after your next save)")
     return 0 if ok else 1
