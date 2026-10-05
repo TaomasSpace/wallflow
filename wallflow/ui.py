@@ -302,7 +302,7 @@ def run(cfg: dict, include_hidden: bool = False) -> int:
     off = depth.disabled()
     items = [{"full": f, "thumb": thumbs.thumb_for(f, cfg),
               "video": config.is_video(cfg, f), "name": os.path.basename(f),
-              "depth": f not in off} for f in files]
+              "depth": depth.enabled_for(f, off)} for f in files]
 
     current = backend.read_current()
     start = next((i for i, it in enumerate(items) if it["full"] == current), 0)

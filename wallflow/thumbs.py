@@ -4,13 +4,13 @@ import os
 import shutil
 import subprocess
 
-from . import config, paths
+from . import config, ident, paths
 
 
 def thumb_path(src: str, width: int) -> str:
-    st = os.stat(src)
-    key = f"{src}:{st.st_mtime_ns}:{width}"
-    return str(paths.THUMB_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".jpg"))
+    key = f"{width}"
+    return str(ident.migrate(paths.THUMB_DIR / (ident.sha(f"{ident.file_id(src)}:{key}") + ".jpg"),
+                             paths.THUMB_DIR / (ident.sha(f"{ident.legacy(src)}:{key}") + ".jpg")))
 
 
 def _video_thumb(src: str, tp: str, width: int) -> str:

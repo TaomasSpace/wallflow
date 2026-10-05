@@ -1,7 +1,7 @@
 """Downscale/cap video wallpapers to display resolution + fps so the decoder loops cheaply.
 
 Output lives in ~/.cache/wallflow/transcoded/<hash>.mp4. The hash covers the
-source (path+mtime) and every setting that changes the output, so editing
+source's content (ident.py, so renames don't matter) and every setting that changes the output, so editing
 config.toml naturally invalidates old transcodes. Sources that are already
 within limits get a `.skip` marker and are played as-is.
 """
@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import config, paths
+from . import config, ident, paths
 
 
 def _settings(cfg: dict) -> dict:
@@ -22,10 +22,13 @@ def _settings(cfg: dict) -> dict:
 
 
 def target(src: str, cfg: dict) -> Path:
-    st = os.stat(src)
+    """Keyed by file content + settings (ident.py), so renames never re-encode."""
     s = _settings(cfg)
-    key = f"{src}:{st.st_mtime_ns}:{s['w']}:{s['fps']}:{s['enc']}:{s['q']}"
-    return paths.TRANSCODE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".mp4")
+    key = f"{s['w']}:{s['fps']}:{s['enc']}:{s['q']}"
+    new = paths.TRANSCODE_DIR / (ident.sha(f"{ident.file_id(src)}:{key}") + ".mp4")
+    old = paths.TRANSCODE_DIR / (ident.sha(f"{ident.legacy(src)}:{key}") + ".mp4")
+    ident.migrate(new.with_suffix(".skip"), old.with_suffix(".skip"))
+    return ident.migrate(new, old)
 
 
 def existing(src: str, cfg: dict) -> str | None:

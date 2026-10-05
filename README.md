@@ -248,6 +248,12 @@ numbering, so hidden files never collide with the main folder's). Mode is set in
 2   full rename: <rename.animated_wallpaper_prefix>_1, <rename.wallpaper_prefix>_1, …
 ```
 
+Mode 2 numbering is stable: a file already called `wallpaper_7` keeps its number, and new files
+are appended after the highest one — adding a wallpaper renames only that wallpaper. Deleting one
+leaves a gap; `wallflow rename --compact` renumbers everything 1..n when you want that. Either way
+nothing is recomputed: cutouts, transcodes, thumbnails, hand-picks and per-image settings are
+keyed by file *content*, not by name, so a renamed wallpaper keeps all of them.
+
 The prefixes (`rename.animated_prefix`, `rename.wallpaper_prefix`, `rename.animated_wallpaper_prefix`)
 are configurable, e.g. `wallflow config set rename.wallpaper_prefix wp`.
 

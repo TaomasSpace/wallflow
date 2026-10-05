@@ -19,7 +19,7 @@
   wallflow depth train         learn your taste from those masks (depth.mode learned uses it)
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
-  wallflow rename [--dry-run]  rename wallpapers per [rename].mode
+  wallflow rename [--dry-run] [--compact]  rename per [rename].mode (--compact: renumber 1..n)
   wallflow theme               re-run wallust + addon reloads
   wallflow theme list          show wallust palettes (current marked)
   wallflow theme set <name>    switch palette, save + re-theme
@@ -240,7 +240,7 @@ def _cmd_watch(a, cfg):
 
 
 def _cmd_rename(a, cfg):
-    ops = rename.plan(cfg)
+    ops = rename.plan(cfg, compact=a.compact)
     if not ops:
         print("mode 0 (off) or nothing to do")
         return
@@ -414,6 +414,7 @@ def build_parser():
 
     x = sp.add_parser("rename", help="rename wallpapers per [rename].mode (0 off / 1 prefix / 2 full)")
     x.add_argument("--dry-run", action="store_true", help="print planned renames without touching files")
+    x.add_argument("--compact", action="store_true", help="mode 2: renumber everything 1..n (closes gaps)")
     x.set_defaults(fn=_cmd_rename)
 
     x = sp.add_parser("addons")

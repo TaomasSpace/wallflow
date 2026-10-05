@@ -55,6 +55,12 @@ def editor_ready() -> bool:
 # --- keys + paths -------------------------------------------------------------------------
 
 def mkey(src: str) -> str:
+    """Hand-picks are keyed by file content (ident.py): renaming keeps them."""
+    from . import ident
+    return _sha(f"{ident.file_id(src)}:manual")
+
+
+def _legacy_mkey(src: str) -> str:
     st = os.stat(src)
     return _sha(f"{os.path.abspath(src)}:{st.st_mtime_ns}:manual")
 
@@ -74,7 +80,9 @@ def masks_saved() -> int:
 # --- saved (manual) selection ---------------------------------------------------------------
 
 def _manual_json(src: str) -> Path:
-    return paths.CUTOUT_DIR / f"{mkey(src)}.manual.json"
+    from . import ident
+    return ident.migrate(paths.CUTOUT_DIR / f"{mkey(src)}.manual.json",
+                         paths.CUTOUT_DIR / f"{_legacy_mkey(src)}.manual.json")
 
 
 def manual_state(src: str) -> dict | None:
@@ -111,6 +119,9 @@ def save_manual(src: str, cutout: str | None, coverage: float = 0.0) -> None:
     paths.CUTOUT_DIR.mkdir(parents=True, exist_ok=True)
     mk = mkey(src)
     keep = os.path.basename(cutout) if cutout else None
+    prev = (manual_state(src) or {}).get("cutout")
+    if prev and prev != keep:                  # e.g. one still named after the old path key
+        (paths.CUTOUT_DIR / prev).unlink(missing_ok=True)
     for p in paths.CUTOUT_DIR.glob(f"{mk}.manual-*.png"):
         if p.name != keep:
             p.unlink(missing_ok=True)

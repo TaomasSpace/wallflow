@@ -24,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, paths
+from . import config, ident, paths
 
 # Runs inside the venv (own python, own site-packages); wallflow never imports rembg.
 _WORKER = r"""
@@ -307,23 +307,46 @@ def setup(gpu: bool = False, python: str = "", log=print) -> int:
 
 # --- per-image on/off --------------------------------------------------------
 
+def _upgrade_key(k: str) -> str:
+    """Old entries were file paths; they become content ids the first time they're read
+    (right after updating, before any rename can make a path point at another file)."""
+    if k.startswith("/") and os.path.isfile(k):
+        try:
+            return ident.file_id(k)
+        except OSError:
+            pass
+    return k
+
+
 def disabled() -> set[str]:
     try:
-        return set(json.loads(paths.DEPTH_OFF_FILE.read_text()))
+        raw = json.loads(paths.DEPTH_OFF_FILE.read_text())
     except (OSError, ValueError):
         return set()
+    off = {_upgrade_key(k) for k in raw}
+    if off != set(raw):
+        paths.DEPTH_OFF_FILE.write_text(json.dumps(sorted(off), indent=2))
+    return off
 
 
 def set_enabled(src: str, on: bool) -> None:
-    src = os.path.abspath(src)
+    """Stored by content id (survives renames); an old path entry is dropped on the way."""
     off = disabled()
-    (off.discard if on else off.add)(src)
+    off.discard(os.path.abspath(src))
+    fid = ident.file_id(src)
+    (off.discard if on else off.add)(fid)
     paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     paths.DEPTH_OFF_FILE.write_text(json.dumps(sorted(off), indent=2))
 
 
-def enabled_for(src: str) -> bool:
-    return os.path.abspath(src) not in disabled()
+def enabled_for(src: str, off: set | None = None) -> bool:
+    off = disabled() if off is None else off
+    if not off:
+        return True
+    try:
+        return ident.file_id(src) not in off
+    except OSError:
+        return True
 
 
 # --- per-image tuning ---------------------------------------------------------
@@ -337,31 +360,48 @@ TUNABLE = ("mode", "near", "feather", "model", "alpha_matting", "depth_model", "
 
 def tunes() -> dict[str, dict]:
     try:
-        return json.loads(paths.DEPTH_TUNE_FILE.read_text())
+        raw = json.loads(paths.DEPTH_TUNE_FILE.read_text())
     except (OSError, ValueError):
+        return {}
+    t = {_upgrade_key(k): v for k, v in raw.items()}
+    if set(t) != set(raw):
+        paths.DEPTH_TUNE_FILE.write_text(json.dumps(t, indent=2))
+    return t
+
+
+def tune_for(src: str, t: dict | None = None) -> dict:
+    t = tunes() if t is None else t
+    if not t:
+        return {}
+    try:
+        return t.get(ident.file_id(src)) or {}
+    except OSError:
         return {}
 
 
 def set_tune(src: str, values: dict | None) -> dict:
-    """values=None clears the override. Returns the image's effective override."""
-    src = os.path.abspath(src)
+    """values=None clears the override. Returns the image's effective override.
+    Stored by content id (survives renames)."""
     t = tunes()
+    cur = tune_for(src, t)
+    t.pop(os.path.abspath(src), None)
+    fid = ident.file_id(src)
     if values is None:
-        t.pop(src, None)
+        t.pop(fid, None)
     else:
-        cur = t.get(src, {})
+        cur = dict(cur)
         cur.update(values)
-        t[src] = cur
+        t[fid] = cur
     paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     paths.DEPTH_TUNE_FILE.write_text(json.dumps(t, indent=2))
-    return t.get(src, {})
+    return t.get(fid, {})
 
 
 def settings(src: str, cfg: dict) -> dict:
     """[depth] with this image's overrides applied. mode "learned" without a trained model
     behaves like "auto" until `wallflow depth train` has run."""
     d = dict(cfg["depth"])
-    d.update(tunes().get(os.path.abspath(src), {}))
+    d.update(tune_for(src))
     if d["mode"] == "learned":
         from . import learn
         if not learn.ready(cfg):
@@ -378,9 +418,9 @@ def notify(title: str, body: str = "", urgency: str = "low") -> None:
 # --- cache -----------------------------------------------------------------
 
 def target(src: str, cfg: dict) -> Path:
-    st = os.stat(src)
+    """Cutout path. Keyed by file CONTENT + settings, so renames never redo it."""
     d = settings(src, cfg)
-    key = f"{src}:{st.st_mtime_ns}:{d['mode']}"
+    key = f"{d['mode']}"
     if d["mode"] in ("subject", "both", "auto", "near"):
         key += f":{d['model']}:{int(bool(d['alpha_matting']))}"
     if d["mode"] in ("depth", "both", "auto", "near"):
@@ -393,23 +433,26 @@ def target(src: str, cfg: dict) -> Path:
     if d["mode"] == "learned":                 # retraining makes new cutouts (lazily, on next use)
         from . import learn, objects
         key += f":{objects.edit_model(cfg)}:{learn.stamp()}"
-    return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
+    new = paths.CUTOUT_DIR / (ident.sha(f"{ident.file_id(src)}:{key}") + ".png")
+    old = paths.CUTOUT_DIR / (ident.sha(f"{ident.legacy(src)}:{key}") + ".png")
+    ident.migrate(new.with_suffix(".skip"), old.with_suffix(".skip"))
+    return ident.migrate(new, old)
 
 
 def subject_path(src: str, cfg: dict) -> Path:
     """Raw subject mask of the configured rembg model, shared by the automatic
     cutout and `wallflow depth edit` (so e.g. birefnet runs once per image)."""
-    st = os.stat(src)
-    key = f"{src}:{st.st_mtime_ns}:subject-raw:{settings(src, cfg)['model']}"
-    return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".subject.png")
+    key = f"subject-raw:{settings(src, cfg)['model']}"
+    return ident.migrate(paths.CUTOUT_DIR / (ident.sha(f"{ident.file_id(src)}:{key}") + ".subject.png"),
+                         paths.CUTOUT_DIR / (ident.sha(f"{ident.legacy(src)}:{key}") + ".subject.png"))
 
 
 def depthmap_path(src: str, cfg: dict) -> Path:
     """The raw depth map is cached on its own: retuning depth.near/feather then
     only redoes the (fast) thresholding, not the model."""
-    st = os.stat(src)
-    key = f"{src}:{st.st_mtime_ns}:{settings(src, cfg)['depth_model']}"
-    return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".depth.npy")
+    key = f"{settings(src, cfg)['depth_model']}"
+    return ident.migrate(paths.CUTOUT_DIR / (ident.sha(f"{ident.file_id(src)}:{key}") + ".depth.npy"),
+                         paths.CUTOUT_DIR / (ident.sha(f"{ident.legacy(src)}:{key}") + ".depth.npy"))
 
 
 def applicable(src: str, cfg: dict) -> bool:
@@ -609,15 +652,15 @@ def status_text(cfg: dict) -> str:
         f" · subject {d['model']}{' + alpha matting' if d['alpha_matting'] else ''}",
         f"auto     : {'on — wallflow watch segments new images' if d['auto'] else 'off (depth.auto)'}",
         f"images   : {len(imgs)} total, {have} with cutout, {skipped} without subject, "
-        f"{len([f for f in imgs if f in off])} switched off, {len(pending(cfg))} pending",
+        f"{len([f for f in imgs if not enabled_for(f, off)])} switched off, {len(pending(cfg))} pending",
     ]
     if cur:
         state = ("video — no cutout" if config.is_video(cfg, cur) else
-                 "off for this image" if cur in off else
+                 "off for this image" if not enabled_for(cur, off) else
                  objects.status_line(cur, cfg) if objects.has_manual(cur) else
                  "cutout ready" if existing(cur, cfg) else
                  "nothing in front" if target(cur, cfg).with_suffix(".skip").exists() else "pending")
-        tune = tunes().get(cur)
+        tune = tune_for(cur)
         lines.append(f"current  : {os.path.basename(cur)} — {state}"
                      + (f"  tuned: {' '.join(f'{k}={v}' for k, v in tune.items())}" if tune else ""))
     lines.append(f"tuned    : {len(tunes())} image(s) with their own settings (depth tune)")
