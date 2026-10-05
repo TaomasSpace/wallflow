@@ -33,6 +33,8 @@ OVERLAY_STATE = CACHE_DIR / "overlay.json"     # what the overlay draws; watched
 OVERLAY_PID = CACHE_DIR / "overlay.pid"
 OVERLAY_EDIT = CACHE_DIR / "overlay.edit"      # exists = edit mode (widgets draggable)
 DEPTH_VENV = DATA_HOME / "wallflow-depth"      # rembg + onnxruntime live here, not in DEST
+MODEL_DIR = DATA_HOME / "wallflow-models"      # legacy: SAM 3 download of the old editor (uninstall removes it)
+MASK_DIR = DATA_HOME / "wallflow-masks"       # your `depth edit` masks = training data (kept on reset)
 
 MPV_SOCKET = RUNTIME_DIR / "wallflow-mpv.sock"   # mpv IPC (hot-swap / pause)
 

@@ -29,11 +29,13 @@ from . import config, paths
 # Runs inside the venv (own python, own site-packages); wallflow never imports rembg.
 _WORKER = r"""
 # argv: src dst mode near feather subject_model depth_model alpha_matting depthmap_path
+#       min_separation occluder_margin [subject_mask_cache]
 import sys, os
 from io import BytesIO
 import numpy as np
 from PIL import Image
 src, dst, mode, near, feather, smodel, dmodel, am, dmap, minsep, margin = sys.argv[1:12]
+spath = sys.argv[12] if len(sys.argv) > 12 else ""
 auto_near = str(near).lower() == "auto"
 near = None if auto_near else float(near)
 feather = float(feather); minsep = float(minsep); margin = float(margin)
@@ -119,12 +121,29 @@ def depth_alpha(d):
     return guided(a, guide, r, 1e-3)
 
 def subject_alpha():
+    # The raw (soft) mask is cached and shared with `wallflow depth edit`, so the
+    # subject model (birefnet can take a while on CPU) runs once per image.
+    # rembg's post_process on the raw mask == what remove(post_process_mask=True)
+    # returns; alpha_matting is never applied there (rembg skips it for only_mask).
     from rembg import new_session, remove
-    with open(src, "rb") as f:
-        data = f.read()
-    m = remove(data, session=new_session(smodel), post_process_mask=True,
-               alpha_matting=(am == "1"), only_mask=True)
-    return np.asarray(Image.open(BytesIO(m)).convert("L"), np.float32) / 255.0
+    from rembg.bg import post_process
+    raw = None
+    if spath and os.path.exists(spath):
+        try:
+            raw = Image.open(spath).convert("L")
+            if raw.size != (W, H):
+                raw = None
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = remove(img, session=new_session(smodel), post_process_mask=False, only_mask=True).convert("L")
+        if raw.size != (W, H):
+            raw = raw.resize((W, H), Image.BILINEAR)
+        if spath:
+            tmp = spath + ".part.png"
+            raw.save(tmp, "PNG")
+            os.replace(tmp, spath)
+    return post_process(np.asarray(raw)).astype(np.float32) / 255.0
 
 preview = mode.startswith("preview:")
 if preview:
@@ -214,6 +233,8 @@ Image.fromarray(out, "RGBA").save(dst, "PNG", optimize=False)
 
 
 last_error = ""      # stderr tail of the last failed worker run (for callers that were quiet)
+SAM2 = "git+https://github.com/facebookresearch/sam2.git"   # the editor's segmenter (pick_worker.py)
+TORCH_INDEX = {True: "https://download.pytorch.org/whl/cu128", False: "https://download.pytorch.org/whl/cpu"}
 
 
 # --- venv ------------------------------------------------------------------
@@ -226,15 +247,25 @@ def ready() -> bool:
     return venv_python().exists()
 
 
-def setup(gpu: bool = False, python: str = "", log=print) -> int:
-    """Create the venv and pip-install rembg (+ onnxruntime). Idempotent.
+def _pip(vp: Path, *args: str, env: dict | None = None) -> int:
+    """pip into the venv. uv when it's there: much faster, and it shares its cache, so
+    torch isn't downloaded again if you already have it elsewhere."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install", "--python", str(vp), *args]
+    else:
+        cmd = [str(vp), "-m", "pip", "install", "--timeout", "120", *args]
+    return subprocess.run(cmd, env={**os.environ, "UV_HTTP_TIMEOUT": "300", **(env or {})}).returncode
 
-    `python` = interpreter for the venv. onnxruntime wheels usually trail the newest
-    CPython by a few months — if pip finds none for the system python, pass an older
-    one (`--python python3.12`)."""
+
+def setup(gpu: bool = False, python: str = "", log=print) -> int:
+    """Create the venv and install rembg (+ onnxruntime) and the editor's torch + SAM 2.1.
+    Idempotent.
+
+    `python` = interpreter for the venv. onnxruntime/torch wheels usually trail the newest
+    CPython by a few months — if none exist for the system python, pass an older one
+    (`--python python3.12`)."""
     vp = venv_python()
     if python and vp.exists():
-        import shutil
         shutil.rmtree(paths.DEPTH_VENV, ignore_errors=True)   # rebuild with the requested interpreter
     if not vp.exists():
         log(f"creating venv {paths.DEPTH_VENV} ({python or sys.executable})")
@@ -242,18 +273,35 @@ def setup(gpu: bool = False, python: str = "", log=print) -> int:
         if r.returncode != 0:
             log("could not create the venv (python3-venv missing?)")
             return 1
+    hint = ("    wallflow depth setup --python python3.12   (Arch: `uv python install 3.12`, then "
+            "--python \"$(uv python find 3.12)\")")
     extra = "gpu" if gpu else "cpu"
-    log(f"installing rembg[{extra}] (a few hundred MB, one-off) …")
-    r = subprocess.run([str(vp), "-m", "pip", "install", "--upgrade", "--quiet",
-                        f"rembg[{extra}]", "pillow", "numpy", "huggingface_hub"])
-    if r.returncode != 0:
-        log("pip failed — if no onnxruntime wheel exists for this python yet, use an older one:\n"
-            "    wallflow depth setup --python python3.12   (Arch: pacman -S python312, or `uv python install 3.12`)")
+    log(f"installing rembg[{extra}] for the automatic cutouts (a few hundred MB, one-off) …")
+    if _pip(vp, "--upgrade", f"rembg[{extra}]", "pillow", "numpy", "scipy", "huggingface_hub",
+            "opencv-python-headless") != 0:
+        log("install failed — if no onnxruntime wheel exists for this python yet, use an older one:\n" + hint)
+        return 1
+    log(f"installing torch ({'CUDA' if gpu else 'CPU'}) + SAM 2.1 for `wallflow depth edit` "
+        f"({'~2.5 GB' if gpu else '~250 MB'}, one-off) …")
+    if _pip(vp, "torch", "torchvision", "--index-url", TORCH_INDEX[bool(gpu)],
+            "--extra-index-url", "https://pypi.org/simple") != 0:
+        log("torch failed to install — a timeout? run setup again (finished downloads are kept); "
+            "no wheel for this python? use an older one:\n" + hint)
+        return 1
+    # SAM 2's build imports torch, so no build isolation; its optional CUDA extension isn't needed
+    if _pip(vp, "setuptools", "wheel") != 0 or \
+            _pip(vp, "--no-build-isolation", SAM2, env={"SAM2_BUILD_CUDA": "0"}) != 0:
+        log("SAM 2.1 failed to install (needs `git`) — `wallflow depth edit` won't work; "
+            "automatic cutouts still do")
         return 1
     if gpu:
-        log("note: onnxruntime-gpu needs CUDA + cuDNN libraries on the system; if cutouts fail, "
-            "rerun `wallflow depth setup` without --gpu")
-    log("done — models download on first use (rembg -> ~/.u2net, Depth Anything -> ~/.cache/huggingface)")
+        log("note: onnxruntime-gpu needs CUDA + cuDNN libraries on the system for the automatic\n"
+            "      cutouts; torch (the editor) brings its own. If cutouts fail, rerun without --gpu")
+    log("done — models download on first use (rembg -> ~/.u2net, Depth Anything + SAM 2.1 ->\n"
+        "       ~/.cache/huggingface). Try it: `wallflow depth edit` or E in the picker")
+    if paths.MODEL_DIR.exists():
+        log(f"       the old editor's SAM 3 download ({paths.MODEL_DIR}) isn't used any more — "
+            "delete it to free 3+ GB")
     return 0
 
 
@@ -340,6 +388,14 @@ def target(src: str, cfg: dict) -> Path:
     return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".png")
 
 
+def subject_path(src: str, cfg: dict) -> Path:
+    """Raw subject mask of the configured rembg model, shared by the automatic
+    cutout and `wallflow depth edit` (so e.g. birefnet runs once per image)."""
+    st = os.stat(src)
+    key = f"{src}:{st.st_mtime_ns}:subject-raw:{settings(src, cfg)['model']}"
+    return paths.CUTOUT_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".subject.png")
+
+
 def depthmap_path(src: str, cfg: dict) -> Path:
     """The raw depth map is cached on its own: retuning depth.near/feather then
     only redoes the (fast) thresholding, not the model."""
@@ -362,6 +418,9 @@ def existing(src: str, cfg: dict) -> str | None:
     """Cached cutout for this wallpaper, or None."""
     if not applicable(src, cfg):
         return None
+    from . import objects
+    if objects.has_manual(src):              # hand-picked in `wallflow depth edit` — wins
+        return objects.manual_cutout(src)    # (None = the user put nothing in front)
     t = target(src, cfg)
     return str(t) if t.exists() and t.stat().st_size > 0 else None
 
@@ -369,6 +428,9 @@ def existing(src: str, cfg: dict) -> str | None:
 def wanted(src: str, cfg: dict) -> bool:
     """True if there's neither a cutout nor a skip-marker yet (and we can make one)."""
     if not applicable(src, cfg) or not ready():
+        return False
+    from . import objects
+    if objects.has_manual(src):              # hand-picked: never overwritten by the automatic one
         return False
     dst = target(src, cfg)
     return not dst.exists() and not dst.with_suffix(".skip").exists()
@@ -441,7 +503,7 @@ def _worker_cmd(src: str, dst: str, cfg: dict, preview: bool = False) -> list[st
             ("preview:" if preview else "") + d["mode"],
             str(d["near"]), str(d["feather"]), d["model"], d["depth_model"],
             "1" if d["alpha_matting"] else "0", str(depthmap_path(src, cfg)),
-            str(d["min_separation"]), str(d["occluder_margin"])]
+            str(d["min_separation"]), str(d["occluder_margin"]), str(subject_path(src, cfg))]
 
 
 def preview(src: str, cfg: dict, log=print) -> Path | None:
@@ -525,6 +587,8 @@ def status_text(cfg: dict) -> str:
     skipped = sum(1 for f in imgs if applicable(f, cfg) and target(f, cfg).with_suffix(".skip").exists())
     cur = read_current()
     d = cfg["depth"]
+    from . import objects
+    picked = sum(1 for f in imgs if objects.has_manual(f))
     lines = [
         f"setup    : {'ready (' + str(paths.DEPTH_VENV) + ')' if ready() else 'not set up — wallflow depth setup'}",
         f"mode     : {d['mode']}  (auto = subject + what's nearer than it · near = nearest depth group · depth · subject · both)",
@@ -537,13 +601,18 @@ def status_text(cfg: dict) -> str:
     if cur:
         state = ("video — no cutout" if config.is_video(cfg, cur) else
                  "off for this image" if cur in off else
+                 objects.status_line(cur, cfg) if objects.has_manual(cur) else
                  "cutout ready" if existing(cur, cfg) else
                  "nothing in front" if target(cur, cfg).with_suffix(".skip").exists() else "pending")
         tune = tunes().get(cur)
         lines.append(f"current  : {os.path.basename(cur)} — {state}"
                      + (f"  tuned: {' '.join(f'{k}={v}' for k, v in tune.items())}" if tune else ""))
     lines.append(f"tuned    : {len(tunes())} image(s) with their own settings (depth tune)")
+    lines.append(f"edit     : {picked} image(s) hand-picked, {objects.masks_saved()} mask(s) saved as training data"
+                 f" · {objects.edit_model(cfg).split('/')[-1]} "
+                 + ("ready" if objects.editor_ready() else "not installed — `wallflow depth setup` once more"))
     lines.append("           wallflow depth all | on|off [file] | tune k=v … [file] | map [file] | --prune")
+    lines.append("           wallflow depth edit [file] | edit reset [file] | edit import DIR")
     return "\n".join(lines)
 
 
@@ -554,7 +623,10 @@ def prune(cfg: dict) -> int:
     for f in gather_wallpapers(cfg, include_hidden=True):
         if not config.is_video(cfg, f):
             t = target(f, cfg)
-            keep.update({t.name, t.with_suffix(".skip").name, depthmap_path(f, cfg).name})
+            keep.update({t.name, t.with_suffix(".skip").name, depthmap_path(f, cfg).name,
+                         subject_path(f, cfg).name})
+            from . import objects
+            keep.update(objects.keep_names(f, cfg))
     n = 0
     for p in paths.CUTOUT_DIR.glob("*") if paths.CUTOUT_DIR.is_dir() else []:
         if p.name not in keep:

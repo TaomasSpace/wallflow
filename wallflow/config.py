@@ -85,6 +85,10 @@ DEFAULTS: dict = {
         "model": "isnet-anime",       # rembg model for subject/both: isnet-anime | isnet-general-use | birefnet-general
         "alpha_matting": False,       # subject/both: finer edges (hair), several times slower
         "auto": False,                # `wallflow watch` segments new images as they appear (slow on CPU!)
+        # `wallflow depth edit` (E in the picker): point at things, SAM 2.1 cuts out what you
+        # pointed at. Model = facebook/sam2.1-hiera-{large,base-plus,small,tiny}; smaller = faster
+        # on CPU, large is best and quick on a GPU (`wallflow depth setup --gpu`)
+        "edit_model": "facebook/sam2.1-hiera-large",
         "notify": True,               # desktop notification while a cutout is being made in the background
     },
     "overlay": {

@@ -40,6 +40,7 @@ def run(purge: bool = False, yes: bool = False) -> int:
     paths.LAUNCHER.unlink(missing_ok=True)
     shutil.rmtree(paths.INSTALL_DIR, ignore_errors=True)
     shutil.rmtree(paths.DEPTH_VENV, ignore_errors=True)     # the rembg venv is code, not data
+    shutil.rmtree(paths.MODEL_DIR, ignore_errors=True)      # old editor's SAM 3 download, if any
     # the clone made by the curl one-liner / `wallflow update` is ours to delete;
     # a checkout the user made themselves (anywhere else) is not
     managed_src = paths.DATA_HOME / "wallflow-src"
@@ -48,7 +49,8 @@ def run(purge: bool = False, yes: bool = False) -> int:
     if purge:
         shutil.rmtree(paths.CONFIG_DIR, ignore_errors=True)
         shutil.rmtree(paths.CACHE_DIR, ignore_errors=True)
-        print("removed wallflow, config and cache")
+        shutil.rmtree(paths.MASK_DIR, ignore_errors=True)
+        print("removed wallflow, config, cache and your depth-edit masks")
     else:
         print(f"removed wallflow (kept {paths.CONFIG_DIR} and {paths.CACHE_DIR}; --purge deletes them)")
     return 0

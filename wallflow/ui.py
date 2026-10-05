@@ -50,6 +50,13 @@ Window {
             else if (event.key === Qt.Key_End) view.currentIndex = view.count - 1
             else if (event.key === Qt.Key_R && view.count > 0)
                 view.currentIndex = Math.floor(Math.random() * view.count)
+            else if (event.key === Qt.Key_E && view.count > 0 && depthAvailable) {
+                const it = wallpapers[view.currentIndex]
+                if (!it.video) {
+                    backend.editDepth(it.full)       // opens the object editor, picker closes
+                    win.close()
+                }
+            }
             else if (event.key === Qt.Key_D && view.count > 0 && depthAvailable) {
                 const it = wallpapers[view.currentIndex]
                 if (!it.video) {
@@ -185,7 +192,7 @@ Window {
         color: "#aaffffff"
         font.pixelSize: 13
         text: "\u2190 / \u2192  browse   \u00b7   Enter  apply   \u00b7   R  random"
-              + (depthAvailable ? "   \u00b7   D  3D on/off" : "") + "   \u00b7   Esc  cancel"
+              + (depthAvailable ? "   \u00b7   D  3D on/off   \u00b7   E  edit 3D layer" : "") + "   \u00b7   Esc  cancel"
     }
 }
 """
@@ -270,6 +277,11 @@ def run(cfg: dict, include_hidden: bool = False) -> int:
         @Slot(str)
         def apply(self, path: str) -> None:
             backend.apply(path, cfg)
+
+        @Slot(str)
+        def editDepth(self, path: str) -> None:
+            from . import objects
+            objects.launch_editor(path)
 
         @Slot(str, result=bool)
         def toggleDepth(self, path: str) -> bool:

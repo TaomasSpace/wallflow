@@ -34,6 +34,7 @@ The only question it asks is the wallpaper folder (default `~/Pictures/Wallpaper
 | `wallflow transcode` | pre-transcode all video wallpapers now (otherwise it happens lazily) |
 | `wallflow depth setup` | once: install the segmentation venv, so widgets can sit *behind* the wallpaper's subject |
 | `wallflow depth all` | segment every image now (`wallflow 3d`); `depth on|off [file]` per image; `depth` = status |
+| `wallflow depth edit [file]` | point at what sits on the 3D layer, SAM 2.1 cuts it out (`E` in the picker) — see below |
 | `wallflow overlay` | `start` / `stop` / `restart` / `status` of the widget + subject layer; `edit` = drag widgets |
 | `wallflow rename [--dry-run]` | rename wallpapers per `rename.mode` (0 off / 1 prefix / 2 full) |
 | `wallflow config edit` | open the config; `config set transcode.fps 24` for one key |
@@ -156,6 +157,41 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   `clock_color`, `clock_opacity`, `clock_shadow`. `overlay.outputs = "DP-1"` limits it to one monitor.
 - **Own widgets**: an addon with `widget = "<file>.qml"` — see `addons/README.md`.
 
+#### Choosing the 3D layer yourself (`wallflow depth edit`, `E` in the picker)
+
+The automatic cutout guesses what is in front. The editor lets you decide by pointing: click
+something and [SAM 2.1](https://github.com/facebookresearch/sam2) cuts out exactly that thing.
+Lit = on the 3D layer (above your widgets), dimmed = stays behind.
+
+| | |
+|---|---|
+| click | the object under the cursor; clicking something already lit takes it off |
+| mouse wheel | right after a click or lasso: step between a smaller part and the whole object |
+| `Shift`+click / `Shift`+right-click | refine the last pick: include / exclude this spot |
+| drag (lasso) | the main object inside the loop — draw it loosely, the loop only clips |
+| right-drag | everything below the line, snapped to the image's edges (a ridge, a ledge, a horizon) |
+| `Ctrl` + any drag | the same, but takes it off the layer (e.g. a floor or a reflection) |
+| `Alt`+drag | exactly the drawn shape, no AI (`Ctrl`+`Alt` cuts it away) |
+| `Space` | preview: wallpaper, your clock (as configured in `[overlay]`), then the 3D layer |
+| middle-click | move the preview clock (the real one: `wallflow overlay edit`) |
+| `A` / `C` / `Ctrl+Z` | automatic cutout / clear / undo |
+| `Enter` / `Del` / `Esc` | apply / back to automatic / cancel |
+
+- It opens with your saved mask for that image, else your earlier hand-pick, else the automatic
+  cutout, else the character mask — so usually you only fix what's wrong.
+- **Applied** selections win over the automatic cutout and are never overwritten by
+  `depth all` / `depth.auto`; `wallflow depth edit reset [file]` returns to automatic.
+- **Your masks are kept** in `~/.local/share/wallflow-masks/` (keyed by file content, so renaming
+  a wallpaper doesn't lose it, and `reset` doesn't delete it). They are the training data for a
+  future "learn my taste" model — back the folder up.
+- **Import**: `wallflow depth edit import ~/.local/share/depthfg/masks` turns masks made with the
+  standalone depthfg tool (or a backup of the folder above) into hand-picks, no SAM needed.
+- **Model**: `depth.edit_model` (default `facebook/sam2.1-hiera-large`, ~900 MB, downloaded on first
+  use to `~/.cache/huggingface`). It runs in the depth venv with torch: `wallflow depth setup --gpu`
+  for an NVIDIA card (opening an image ~1 s, every click instant); on CPU use
+  `facebook/sam2.1-hiera-small` or `-tiny`. After updating wallflow run `wallflow depth setup` once
+  more so the venv gets torch + SAM 2.1.
+
 ### Hidden wallpapers
 
 A `hidden` subfolder is auto-created directly inside `wallpaper_dir` (`wallflow setup` creates it
@@ -213,7 +249,8 @@ When `rename.mode != 0`, two things happen automatically:
 [theme]    enabled, palette (`wallflow theme list|set`), contrast, wallust_args
 [video]    outputs = "*" | "DP-1", mpv_opts, pause_on_fullscreen
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
-[depth]    enabled, mode = "auto"|"near"|"depth"|"subject"|"both", near ("auto"|0..1), feather, min_separation, occluder_margin, depth_model, model, alpha_matting, auto, notify
+[depth]    enabled, mode = "auto"|"near"|"depth"|"subject"|"both", near ("auto"|0..1), feather, min_separation, occluder_margin, depth_model, model, alpha_matting, auto, notify,
+           edit_model (the 3D-layer editor)
 [overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
@@ -238,6 +275,7 @@ Hyprland config: the managed block is written in Lua for `hyprland.lua` and hypr
 ```
 wallflow.py        entry point
 wallflow/          cli · config · detect · setup · hypr · backend · transcode · thumbs · pauser · watcher · addons · ui · rename · depth · overlay
+                   objects (hand-picked layer) · editor (3D-layer editor) · pick_worker (runs in the depth venv: SAM 2.1)
 wallflow/templates overlay.qml (the quickshell layer) · sequences (wallust OSC template)
 addons/<name>/     addon.toml + wallust template and/or widget .qml
 install.sh · uninstall.sh

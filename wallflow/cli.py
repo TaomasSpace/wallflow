@@ -13,6 +13,9 @@
   wallflow depth on|off [file] switch the cutout on/off per image (default: current wallpaper)
   wallflow depth tune near=0.5 mode=both [file]   per-image settings (`tune reset` clears)
   wallflow depth map [file]    show the depth map + resulting cutout side by side
+  wallflow depth edit [file]   point at what goes on the 3D layer, SAM 2.1 cuts it out (E in the picker)
+  wallflow depth edit reset [file]     drop the hand-picked layer (back to automatic)
+  wallflow depth edit import DIR       turn saved masks (e.g. ~/.local/share/depthfg/masks) into hand-picks
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
   wallflow rename [--dry-run]  rename wallpapers per [rename].mode
@@ -117,6 +120,8 @@ def _cmd_depth(a, cfg):
     if a.prune:
         print(f"pruned {depth.prune(cfg)} stale file(s)")
         return
+    if a.action == "edit":
+        return _cmd_edit(a, cfg)
     if a.action in ("tune", "map"):
         toks = [t for t in [a.name, *(a.extra or [])] if t]
         kv = [t for t in toks if "=" in t]
@@ -176,6 +181,31 @@ def _cmd_depth(a, cfg):
         overlay.write_state(cfg)           # the current wallpaper's cutout may just have appeared
         return rc
     print(depth.status_text(cfg))
+
+
+def _cmd_edit(a, cfg):
+    """`wallflow depth edit [file]` / `edit reset [file]` / `edit import DIR`"""
+    from . import objects
+    toks = [t for t in [a.name, *(a.extra or [])] if t]
+    if toks[:1] == ["import"]:
+        if len(toks) < 2:
+            sys.exit("usage: wallflow depth edit import DIR   (e.g. ~/.local/share/depthfg/masks)")
+        return objects.import_masks(toks[1], cfg)
+    files = [t for t in toks if t != "reset"]
+    src = os.path.abspath(os.path.expanduser(files[0])) if files else backend.read_current()
+    if not src or not os.path.exists(src):
+        sys.exit("no wallpaper set and no file given")
+    if config.is_video(cfg, src):
+        sys.exit("videos and GIFs have no 3D layer — pick a still image")
+    if "reset" in toks:
+        had = objects.reset(src)
+        objects.refresh_overlay(src, cfg)
+        print(f"{os.path.basename(src)}: " + ("back to the automatic cutout" if had else "was automatic already"))
+        if depth.wanted(src, cfg) and src == backend.read_current():
+            backend._spawn_background_cutout(src)
+        return 0
+    from . import editor
+    return editor.run(src, cfg)
 
 
 def _cmd_overlay(a, cfg):
@@ -349,15 +379,15 @@ def build_parser():
     x.set_defaults(fn=_cmd_transcode)
 
     x = sp.add_parser("depth", help="3D subject cutouts for the overlay (rembg in its own venv)")
-    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off", "tune", "map"])
-    x.add_argument("name", nargs="?", help="on/off/tune/map: image file (default: current wallpaper)")
-    x.add_argument("extra", nargs="*", help="tune: key=value … / reset")
+    x.add_argument("action", nargs="?", choices=["status", "setup", "all", "on", "off", "tune", "map", "edit"])
+    x.add_argument("name", nargs="?", help="on/off/tune/map/edit: image file (default: current wallpaper)")
+    x.add_argument("extra", nargs="*", help="tune: key=value … / reset · edit: reset / import DIR")
     x.add_argument("--yes", "-y", action="store_true", help="all: skip the 'this takes long' prompt")
-    x.add_argument("--gpu", action="store_true", help="setup: onnxruntime-gpu (needs CUDA/cuDNN)")
+    x.add_argument("--gpu", action="store_true", help="setup: GPU builds (onnxruntime-gpu + CUDA torch for the editor)")
     x.add_argument("--python", default="", help="setup: interpreter for the venv, e.g. python3.12")
     x.add_argument("--file", help="one image instead of the whole folder")
     x.add_argument("--swap", action="store_true", help="hand the cutout to the overlay when done (internal)")
-    x.add_argument("--force", action="store_true")
+    x.add_argument("--force", action="store_true", help="recompute")
     x.add_argument("--prune", action="store_true", help="delete stale cutouts")
     x.add_argument("-v", "--verbose", action="store_true")
     x.set_defaults(fn=_cmd_depth)
