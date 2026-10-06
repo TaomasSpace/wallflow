@@ -157,6 +157,33 @@ transparent cutout and drawn on top of the widgets — a layered composite, not 
   `clock_color`, `clock_opacity`, `clock_shadow`. `overlay.outputs = "DP-1"` limits it to one monitor.
 - **Own widgets**: an addon with `widget = "<file>.qml"` — see `addons/README.md`.
 
+#### Widgets from other programs (Caelestia's clock, eww, AGS, your own quickshell)
+
+The cutout doesn't care whose widget is behind it — only *where* that widget is drawn:
+
+| widget lives on | example | behind the cutout? |
+|---|---|---|
+| `background` layer | Caelestia's desktop clock (part of its wallpaper window), eww `:stacking "bg"` | always |
+| `bottom` layer | eww `:stacking "bottom"`, AGS/quickshell desktop widgets, wallflow's own addons | yes — the overlay keeps itself on top (`overlay.raise`) |
+| `top` / `overlay` layer | bars, launchers, eww `:stacking "fg"` | no — those are above your windows, so the cutout would be too |
+| a normal window | conky as a window, a pinned terminal | no |
+
+- **Staying on top**: on the bottom layer Hyprland draws surfaces in the order they appeared, so a
+  widget started after wallflow would cover the cutout. Whenever a layer opens, the overlay checks
+  `hyprctl -j layers` and, if something got above it, briefly hops to the background layer and
+  back — which puts it last, i.e. on top. Your own scripts can trigger it: `wallflow overlay raise`.
+- **What it covers right now**: `wallflow overlay status` lists, per monitor, which other layers
+  are below the cutout and which (if any) are above it.
+- **Alignment**: the cutout is fitted to the whole screen like the wallpaper (`overlay.fill`:
+  `crop` = cover, `fit`). A widget only lines up if your wallpaper backend fills the same way.
+- **Drawing it yourself**: `~/.cache/wallflow/cutout.png` always points at the current cutout
+  (absent = nothing in front) and `~/.cache/wallflow/cutout.json` (`cutout`, `wallpaper`, `fill`,
+  `rev`) changes on every switch — watch that file. For quickshell configs there's a drop-in:
+  copy `contrib/WallflowCutout.qml` next to your shell.qml and put `WallflowCutout {
+  anchors.fill: parent }` *above* your widgets in the same full-screen window; then it works on
+  any layer, and `overlay.enabled = false` turns wallflow's own overlay off if you don't need it.
+- **Videos** still have no cutout (see Videos and GIFs).
+
 #### Choosing the 3D layer yourself (`wallflow depth edit`, `E` in the picker)
 
 The automatic cutout guesses what is in front. The editor lets you decide by pointing: click
@@ -276,7 +303,7 @@ When `rename.mode != 0`, two things happen automatically:
 [transcode] enabled, encoder = "auto"|"hevc_nvenc"|…|"none", fps, max_width, quality
 [depth]    enabled, mode = "auto"|"near"|"depth"|"subject"|"both"|"learned", near ("auto"|0..1), feather, min_separation, occluder_margin, depth_model, model, alpha_matting, auto, notify,
            edit_model, train_every (the 3D-layer editor + learning)
-[overlay]  enabled, outputs, fill, clock_* — the widget layer, see "Depth overlay"
+[overlay]  enabled, outputs, fill, raise, clock_* — the widget layer, see "Depth overlay"
 [rename]   mode = 0 | 1 | 2 — see "Renaming wallpapers" above
 [ui]       thumb_width, backdrop, close_special_workspaces, hide_pinned_windows
 [hypr]     bind = "SUPER + W", bind_all (default: bind + SHIFT), bind_edit (overlay edit mode), config_file (auto), manage = true
@@ -303,5 +330,6 @@ wallflow/          cli · config · detect · setup · hypr · backend · transc
                    objects (hand-picked layer) · editor (3D-layer editor) · learn (training) · pick_worker (depth venv: SAM 2.1 + learned model)
 wallflow/templates overlay.qml (the quickshell layer) · sequences (wallust OSC template)
 addons/<name>/     addon.toml + wallust template and/or widget .qml
+contrib/           WallflowCutout.qml (the cutout as a drop-in for your own quickshell config)
 install.sh · uninstall.sh
 ```

@@ -51,11 +51,90 @@ def write_state(cfg: dict | None = None, current: str | None = None) -> dict:
         "outputs": cfg["overlay"]["outputs"],
         "fill": cfg["overlay"]["fill"],
         "config": cfg["overlay"],
+        "raise": _raise_count(),
     }
     paths.CACHE_DIR.mkdir(parents=True, exist_ok=True)
     # in place, not tmp+rename: the QML's file watcher follows this inode
     paths.OVERLAY_STATE.write_text(json.dumps(state, indent=2))
+    export(state)
     return state
+
+
+# --- for other shells -----------------------------------------------------------------------
+# Anyone can draw the cutout above their own widgets: ~/.cache/wallflow/cutout.png always
+# points at the current one (absent = nothing in front), cutout.json says how to fit it and
+# changes on every switch - watch that file, not the link. contrib/WallflowCutout.qml is a
+# drop-in for quickshell configs.
+
+def export(state: dict) -> None:
+    cut = state.get("cutout")
+    info = {"cutout": cut, "link": str(paths.CUTOUT_LINK) if cut else None,
+            "wallpaper": state.get("wallpaper"), "fill": state.get("fill", "crop")}
+    try:
+        old = json.loads(paths.CUTOUT_INFO.read_text())
+    except (OSError, ValueError):
+        old = {}
+    if {k: old.get(k) for k in info} == info and (bool(cut) == paths.CUTOUT_LINK.is_symlink()):
+        return                                            # unchanged: don't wake watchers
+    tmp = paths.CUTOUT_LINK.with_name(".cutout.png.part")
+    tmp.unlink(missing_ok=True)
+    if cut:
+        os.symlink(cut, tmp)
+        os.replace(tmp, paths.CUTOUT_LINK)
+    else:
+        paths.CUTOUT_LINK.unlink(missing_ok=True)
+    info["rev"] = int(old.get("rev", 0)) + 1
+    paths.CUTOUT_INFO.write_text(json.dumps(info, indent=2))
+
+
+def _raise_count() -> int:
+    try:
+        return int(paths.OVERLAY_RAISE.read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def lift(cfg: dict) -> bool:
+    """`wallflow overlay raise`: put the cutout back above everything on the bottom layer
+    (e.g. from your own shell's startup, after it created its widgets)."""
+    paths.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    paths.OVERLAY_RAISE.write_text(str(_raise_count() + 1))
+    write_state(cfg)
+    return running()
+
+
+# --- what the cutout covers -------------------------------------------------------------------
+
+_LEVELS = {"0": "background", "1": "bottom", "2": "top", "3": "overlay"}
+
+
+def coverage() -> list[str] | None:
+    """Per monitor: which other programs' layers are below the cutout (covered) and which are
+    above it. None if hyprctl isn't available."""
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        r = subprocess.run(["hyprctl", "-j", "layers"], capture_output=True, text=True, timeout=3)
+        mons = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    ns = "wallflow-overlay"
+    out = []
+    for mon, data in mons.items():
+        lv = data.get("levels", {})
+        bottom = [l.get("namespace", "?") for l in lv.get("1", [])]
+        if ns not in bottom:
+            out.append(f"{mon}: overlay not on the bottom layer here (edit mode, outputs, or not running)")
+            continue
+        i = bottom.index(ns)
+        below = [f"{n} (background)" for n in (l.get("namespace", "?") for l in lv.get("0", []))
+                 if n not in ("wallflow-overlay", "mpvpaper")] + [f"{n} (bottom)" for n in bottom[:i]]
+        above = bottom[i + 1:]
+        line = f"{mon}: covers {', '.join(below) or 'only the wallpaper'}"
+        if above:
+            line += f" · ABOVE the cutout: {', '.join(above)} — `wallflow overlay raise`"
+        out.append(line)
+    return out
 
 
 def _pid() -> int:
@@ -154,5 +233,8 @@ def status_text(cfg: dict) -> str:
         f"depth    : {'ready' if depth.ready() else 'not set up (wallflow depth setup)'}",
         f"cutout   : {st['cutout'] or '-'}",
         f"widgets  : {', '.join(w['name'] for w in st['widgets']) or '-'}",
+        f"raise    : {'on — stays above other programs’ bottom-layer widgets' if cfg['overlay'].get('raise', True) else 'off (overlay.raise)'}",
+        *[f"layers   : {l}" if i == 0 else f"           {l}" for i, l in enumerate(coverage() or [])],
         f"state    : {paths.OVERLAY_STATE}",
+        f"export   : {paths.CUTOUT_INFO} (+ {paths.CUTOUT_LINK.name}) — for other shells, see README",
     ])

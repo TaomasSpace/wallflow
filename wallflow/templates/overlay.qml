@@ -8,8 +8,16 @@
 // Edit mode (state.edit = true, `wallflow overlay edit`): the window moves to the
 // `top` layer, takes input, widgets get draggable; a drop calls root.save(),
 // which runs `wallflow config set …` and the new state flows back in.
+//
+// Other programs' widgets: anything on the `background` layer (Caelestia's desktop
+// clock, eww `:stacking "bg"`) is always below us. On the `bottom` layer Hyprland draws
+// surfaces in the order they appeared, so a widget started after us would cover the
+// cutout. Whenever a layer opens we ask `hyprctl -j layers` whether we're still last on
+// `bottom`, and if not, hop to `background` and back: a layer change re-appends a
+// surface at the end of its new layer, i.e. on top (overlay.raise, `wallflow overlay raise`).
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 
@@ -38,6 +46,54 @@ ShellRoot {
             root.state = JSON.parse(stateFile.text())
         } catch (e) {
             retry.start()
+        }
+    }
+
+    // --- staying on top of other bottom-layer widgets -----------------------------
+    readonly property string ns: "wallflow-overlay"
+    property bool autoRaise: !root.state.config || root.state.config.raise !== false
+    property var liftScreens: []       // screen names to lift on the next liftSeq bump
+    property int liftSeq: 0
+    property int lastManual: -1
+
+    onStateChanged: {
+        const n = root.state.raise || 0
+        if (root.lastManual >= 0 && n !== root.lastManual)
+            root.lift(["*"])                                   // `wallflow overlay raise`
+        root.lastManual = n
+    }
+
+    function lift(names) {
+        root.liftScreens = names
+        root.liftSeq++
+    }
+
+    Connections {
+        target: Hyprland
+        function onRawEvent(event) {
+            if (event.name === "openlayer" && event.data !== root.ns && root.autoRaise)
+                check.restart()
+        }
+    }
+    Timer { id: check; interval: 400; onTriggered: if (!layers.running) layers.running = true }
+    Timer { interval: 1500; running: true; onTriggered: if (root.autoRaise) check.restart() }   // after start
+
+    Process {
+        id: layers
+        command: ["hyprctl", "-j", "layers"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let mons = {}
+                try { mons = JSON.parse(this.text) } catch (e) { return }
+                const behind = []
+                for (const mon in mons) {
+                    const bottom = ((mons[mon].levels || {})["1"] || [])
+                    const ours = bottom.findIndex(l => l.namespace === root.ns)
+                    if (ours >= 0 && ours < bottom.length - 1)
+                        behind.push(mon)
+                }
+                if (behind.length) root.lift(behind)
+            }
         }
     }
 
@@ -79,7 +135,23 @@ ShellRoot {
             screen: modelData
             visible: root.wantsScreen(modelData.name)
 
-            WlrLayershell.layer: root.editing ? WlrLayer.Top : WlrLayer.Bottom
+            // lifting: one short hop to `background` and back puts us last (= on top) on `bottom`
+            property bool lifting: false
+            property int seenLift: 0
+            WlrLayershell.layer: root.editing ? WlrLayer.Top : (lifting ? WlrLayer.Background : WlrLayer.Bottom)
+
+            Connections {
+                target: root
+                function onLiftSeqChanged() {
+                    if (win.seenLift === root.liftSeq || root.editing) return
+                    win.seenLift = root.liftSeq
+                    if (root.liftScreens.indexOf("*") >= 0 || root.liftScreens.indexOf(win.modelData.name) >= 0) {
+                        win.lifting = true
+                        hop.restart()
+                    }
+                }
+            }
+            Timer { id: hop; interval: 90; onTriggered: win.lifting = false }   // two separate commits
             WlrLayershell.namespace: "wallflow-overlay"
             WlrLayershell.keyboardFocus: root.editing ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
             anchors { top: true; bottom: true; left: true; right: true }

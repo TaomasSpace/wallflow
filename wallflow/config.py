@@ -99,6 +99,10 @@ DEFAULTS: dict = {
         "enabled": True,
         "outputs": "*",               # "*" = every monitor, or "DP-1,HDMI-A-1"
         "fill": "crop",               # how the cutout is fitted: crop (= cover, what the backends do) | fit
+        # keep the cutout above widgets of OTHER programs on the bottom layer (eww, AGS, your own
+        # quickshell…): when one appears, the overlay moves itself back on top. Background-layer
+        # widgets (Caelestia's desktop clock) are always below it anyway.
+        "raise": True,
         # clock widget (`wallflow addons install clock`) — fractions of the screen, px, Qt formats
         "clock_x": 0.5,
         "clock_y": 0.12,

@@ -19,6 +19,7 @@
   wallflow depth train         learn your taste from those masks (depth.mode learned uses it)
   wallflow overlay start|stop|restart|status   the widget/subject layer (quickshell)
   wallflow overlay edit|done   drag widgets around with the mouse / stop
+  wallflow overlay raise       put the cutout back above other programs' widgets
   wallflow rename [--dry-run] [--compact]  rename per [rename].mode (--compact: renumber 1..n)
   wallflow theme               re-run wallust + addon reloads
   wallflow theme list          show wallust palettes (current marked)
@@ -230,6 +231,8 @@ def _cmd_overlay(a, cfg):
         print("stopped" if overlay.stop() else "not running")
     elif a.action == "restart":
         print("overlay running" if overlay.restart(cfg) else "overlay not started")
+    elif a.action == "raise":
+        print("raised" if overlay.lift(cfg) else "overlay not running")
     else:
         print(overlay.status_text(cfg))
 
@@ -405,7 +408,7 @@ def build_parser():
 
     x = sp.add_parser("overlay", help="widget + subject layer between wallpaper and windows")
     x.add_argument("action", nargs="?", default="status",
-                   choices=["start", "stop", "restart", "status", "edit", "done"])
+                   choices=["start", "stop", "restart", "status", "edit", "done", "raise"])
     x.set_defaults(fn=_cmd_overlay)
     sp.add_parser("3d", help="alias for `wallflow depth all`").set_defaults(
         fn=lambda a, cfg: _cmd_depth(argparse.Namespace(action="all", name=None, yes=False, gpu=False,

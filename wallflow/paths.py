@@ -32,6 +32,9 @@ CUTOUT_DIR = CACHE_DIR / "cutouts"             # subject cutouts, <hash>.png
 OVERLAY_STATE = CACHE_DIR / "overlay.json"     # what the overlay draws; watched by the QML
 OVERLAY_PID = CACHE_DIR / "overlay.pid"
 OVERLAY_EDIT = CACHE_DIR / "overlay.edit"      # exists = edit mode (widgets draggable)
+OVERLAY_RAISE = CACHE_DIR / "overlay.raise"    # counter: bumping it lifts the overlay (`overlay raise`)
+CUTOUT_LINK = CACHE_DIR / "cutout.png"         # stable path of the current cutout, for other shells
+CUTOUT_INFO = CACHE_DIR / "cutout.json"        # {cutout, wallpaper, fill, rev} - watch this one
 DEPTH_VENV = DATA_HOME / "wallflow-depth"      # rembg + onnxruntime live here, not in DEST
 MODEL_DIR = DATA_HOME / "wallflow-models"      # legacy: SAM 3 download of the old editor (uninstall removes it)
 MASK_DIR = DATA_HOME / "wallflow-masks"       # your `depth edit` masks = training data (kept on reset)
